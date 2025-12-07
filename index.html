@@ -48,11 +48,23 @@
             box-shadow: inset 0 0 100px rgba(200,240,255,0.3);
             transition: opacity 0.1s;
         }
+        #mobile-controls { display: none; }
+        .joystick-area { position: absolute; bottom: 30px; left: 30px; width: 150px; height: 150px; background: rgba(255,255,255,0.2); border-radius: 50%; }
+        #joystick-thumb { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
+        #jump-button { position: absolute; bottom: 40px; right: 40px; width: 80px; height: 80px; background: rgba(255,255,255,0.3); border-radius: 50%; display:flex; justify-content:center; align-items:center; font-size: 14px; color: white; border: 2px solid white; }
+        #camera-controls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
     </style>
 </head>
 <body>
     <div id="vignette"></div>
     <div id="speed-lines"></div>
+    <div id="mobile-controls">
+        <div id="camera-controls"></div>
+        <div class="joystick-area">
+            <div id="joystick-thumb"></div>
+        </div>
+        <div id="jump-button">JUMP</div>
+    </div>
     <div id="blocker">
         <div id="instructions">
             <h1>遥かなる稜線</h1>
@@ -86,6 +98,7 @@
         // --- グローバル変数 ---
         let camera, scene, renderer, controls;
         let playerBody; 
+        let blocker;
         let sky, sun;
         
         const velocity = new THREE.Vector3();
@@ -144,12 +157,17 @@
 
         const FOG_COLOR = 0xcce0ff; 
 
+        let isMobile = false;
+
         init();
         animate();
 
         function init() {
-            const blocker = document.getElementById('blocker');
+            blocker = document.getElementById('blocker');
             const instructions = document.getElementById('instructions');
+            const mobileControls = document.getElementById('mobile-controls');
+
+            isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0010); 
@@ -207,14 +225,23 @@
             controls.minPolarAngle = 0.05; 
             controls.maxPolarAngle = Math.PI - 0.05;
 
-            blocker.addEventListener('click', () => controls.lock());
-            controls.addEventListener('lock', () => {
+            function startExperience() {
                 instructions.style.display = 'none';
                 blocker.style.display = 'none';
-            });
+                if (isMobile) {
+                    mobileControls.style.display = 'block';
+                } else {
+                    controls.lock();
+                }
+            }
+
+            blocker.addEventListener('click', startExperience);
+            blocker.addEventListener('touchstart', startExperience);
+            
             controls.addEventListener('unlock', () => {
                 blocker.style.display = 'block';
                 instructions.style.display = 'flex';
+                 if (isMobile) mobileControls.style.display = 'none';
             });
 
             const onKeyDown = (e) => {
@@ -244,6 +271,10 @@
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
 
+            if (isMobile) {
+                setupMobileControls();
+            }
+
             prepareAssets();
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -256,6 +287,97 @@
             
             document.body.appendChild(renderer.domElement);
             window.addEventListener('resize', onWindowResize);
+        }
+
+        function setupMobileControls() {
+            const joystickThumb = document.getElementById('joystick-thumb');
+            const joystickArea = joystickThumb.parentElement;
+            const jumpButton = document.getElementById('jump-button');
+            const cameraControls = document.getElementById('camera-controls');
+
+            let joystickActive = false;
+            let joystickStart = { x: 0, y: 0 };
+            let joystickCurrent = { x: 0, y: 0 };
+            
+            joystickArea.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                joystickActive = true;
+                const touch = e.touches[0];
+                joystickStart.x = touch.clientX;
+                joystickStart.y = touch.clientY;
+            }, { passive: false });
+
+            joystickArea.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!joystickActive) return;
+                const touch = e.touches[0];
+                joystickCurrent.x = touch.clientX;
+                joystickCurrent.y = touch.clientY;
+                
+                const rect = joystickArea.getBoundingClientRect();
+                const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                
+                let dx = joystickCurrent.x - center.x;
+                let dy = joystickCurrent.y - center.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                const maxDist = rect.width / 2 - joystickThumb.width / 2;
+                
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+                
+                joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+
+                const angle = Math.atan2(dy, dx);
+                const strength = dist / maxDist;
+                
+                moveForward = strength > 0.2 && (angle > -2.5 && angle < -0.5);
+                moveBackward = strength > 0.2 && (angle > 0.5 && angle < 2.5);
+                moveLeft = strength > 0.2 && (angle <= -2.5 || angle > 2.5);
+                moveRight = strength > 0.2 && (angle > -0.5 && angle < 0.5);
+            }, { passive: false });
+            
+            joystickArea.addEventListener('touchend', () => {
+                joystickActive = false;
+                joystickThumb.style.transform = `translate(-50%, -50%)`;
+                moveForward = moveBackward = moveLeft = moveRight = false;
+            });
+
+            jumpButton.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (canJump && !isRolling) {
+                    velocity.y += 160;
+                    canJump = false;
+                }
+            });
+
+            let cameraTouchStart = { x: 0, y: 0 };
+            let cameraTouchCurrent = { x: 0, y: 0 };
+
+            cameraControls.addEventListener('touchstart', (e) => {
+                const touch = e.touches[0];
+                cameraTouchStart.x = touch.clientX;
+                cameraTouchStart.y = touch.clientY;
+            });
+            cameraControls.addEventListener('touchmove', (e) => {
+                const touch = e.touches[0];
+                cameraTouchCurrent.x = touch.clientX;
+                cameraTouchCurrent.y = touch.clientY;
+
+                const dx = (cameraTouchCurrent.x - cameraTouchStart.x) * 0.005;
+                const dy = (cameraTouchCurrent.y - cameraTouchStart.y) * 0.005;
+
+                playerBody.rotation.y -= dx;
+
+                const cam = camera;
+                cam.rotation.x -= dy;
+                cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+
+                cameraTouchStart.x = cameraTouchCurrent.x;
+                cameraTouchStart.y = cameraTouchCurrent.y;
+            });
         }
 
         function prepareAssets() {
@@ -565,7 +687,9 @@
                 }
             }
 
-            if (controls.isLocked) {
+            const gameActive = controls.isLocked || (isMobile && blocker.style.display === 'none');
+
+            if (gameActive) {
                 updateChunks();
 
                 const body = playerBody;
@@ -588,8 +712,24 @@
                     if (moveLeft || moveRight) velocity.x -= direction.x * speedBase * delta;
                 }
 
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(-velocity.z * delta);
+                if (isMobile) {
+                    const forward = new THREE.Vector3();
+                    camera.getWorldDirection(forward);
+                    forward.y = 0;
+                    forward.normalize();
+                    
+                    const right = new THREE.Vector3();
+                    right.crossVectors(camera.up, forward).normalize();
+
+                    const moveDir = new THREE.Vector3();
+                    moveDir.add(forward.multiplyScalar(-velocity.z * delta));
+                    moveDir.add(right.multiplyScalar(-velocity.x * delta));
+                    body.position.add(moveDir);
+
+                } else {
+                    controls.moveRight(-velocity.x * delta);
+                    controls.moveForward(-velocity.z * delta);
+                }
                 body.position.y += (velocity.y * delta); 
 
                 const groundHeight = getNoiseHeight(body.position.x, body.position.z);
