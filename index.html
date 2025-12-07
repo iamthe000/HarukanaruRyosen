@@ -94,8 +94,31 @@
             font-size: 14px; 
             color: white; 
             border: 2px solid white; 
+            user-select: none;
         }
-        /* カメラ操作エリアを画面全体に設定し、ジョイスティックより下に配置 */
+        #dash-button {
+            position: absolute;
+            bottom: 140px;
+            right: 55px;
+            width: 50px;
+            height: 50px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            font-size: 10px;
+            color: white;
+            border: 2px solid white;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        #dash-button.active {
+            background: rgba(255, 200, 50, 0.8);
+            border-color: #ffeba7;
+            color: #331100;
+            font-weight: bold;
+        }
         #camera-controls {
             position: absolute;
             top: 0;
@@ -104,10 +127,9 @@
             height: 100%;
             z-index: 9; 
         }
-        .joystick-area, #jump-button {
+        .joystick-area, #jump-button, #dash-button {
             z-index: 10; 
         }
-
     </style>
 </head>
 <body>
@@ -118,6 +140,7 @@
         <div class="joystick-area">
             <div id="joystick-thumb"></div>
         </div>
+        <div id="dash-button">DASH</div>
         <div id="jump-button">JUMP</div>
     </div>
     <div id="blocker">
@@ -169,11 +192,12 @@
         let walkCycle = 0;
         const camOffset = { x: 0, y: 0 }; 
         
-        let isRolling = false;
-        let rollStartTime = 0;
-        const rollDuration = 0.65;
-        const rollThreshold = 280;
-        let targetRollAngle = 0;
+        let isLandingAnimActive = false;
+        let landingAnimStartTime = 0;
+        const landingAnimDuration = 0.65;
+        const landingAnimThreshold = 280;
+        let targetTiltAngle = 0;
+        let landingAnimRotationX = 0; 
         
         const baseFov = 100;
         const standingEyeHeight = 10;
@@ -214,13 +238,14 @@
 
         let isMobile = false;
         let activeTouch = { joystick: null, camera: null }; 
+        // モバイル入力用の正規化ベクトル (-1.0 ~ 1.0)
+        let joystickInput = { x: 0, y: 0 }; 
+        let mobileDashMode = false;
 
-        // --- Gamepad State ---
         let gamepadConnected = false;
-        const keyState = {}; // Tracks keyboard key presses
+        const keyState = {}; 
 
-        // 視点感度調整用の定数
-        const SENSITIVITY_MULTIPLIER = 20; 
+        const SENSITIVITY_MULTIPLIER = 10; 
 
         init();
         animate();
@@ -240,7 +265,6 @@
             const instructions = document.getElementById('instructions');
             const mobileControls = document.getElementById('mobile-controls');
 
-            // ユーザーエージェントベースのモバイル判定
             isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
 
             scene = new THREE.Scene();
@@ -352,33 +376,38 @@
             const joystickThumb = document.getElementById('joystick-thumb');
             const joystickArea = joystickThumb.parentElement;
             const jumpButton = document.getElementById('jump-button');
+            const dashButton = document.getElementById('dash-button');
             const cameraControls = document.getElementById('camera-controls');
             const controlsRoot = document.getElementById('mobile-controls'); 
 
             let joystickRect = joystickArea.getBoundingClientRect();
             
-            // タッチ開始時の処理
             controlsRoot.addEventListener('touchstart', (e) => {
                 e.preventDefault(); 
-                
+                joystickRect = joystickArea.getBoundingClientRect();
+
                 for (let i = 0; i < e.changedTouches.length; i++) {
                     const touch = e.changedTouches[i];
 
-                    // ジョイスティックエリア判定
                     if (joystickArea.contains(touch.target)) {
-                        
                         if (activeTouch.joystick === null) {
                             activeTouch.joystick = touch.identifier;
                         }
                     } 
-                    // ジャンプボタンエリア判定
                     else if (jumpButton.contains(touch.target)) {
-                        if (canJump && !isRolling) {
+                        if (canJump && !isLandingAnimActive) {
                             velocity.y += 160;
                             canJump = false;
                         }
                     }
-                    // カメラ操作エリア判定
+                    else if (dashButton.contains(touch.target)) {
+                        mobileDashMode = !mobileDashMode;
+                        if (mobileDashMode) {
+                            dashButton.classList.add('active');
+                        } else {
+                            dashButton.classList.remove('active');
+                        }
+                    }
                     else if (activeTouch.camera === null) {
                         activeTouch.camera = touch.identifier;
                         cameraControls.dataset.prevX = touch.clientX;
@@ -387,7 +416,6 @@
                 }
             }, { passive: false });
 
-            // タッチ移動中の処理
             controlsRoot.addEventListener('touchmove', (e) => {
                 e.preventDefault();
                 
@@ -396,56 +424,53 @@
                     const x = touch.clientX;
                     const y = touch.clientY;
 
-                    // --- プレイヤー移動 (ジョイスティック) ---
+                    // --- Joystick Logic ---
                     if (touch.identifier === activeTouch.joystick) {
                         const center = { x: joystickRect.left + joystickRect.width / 2, y: joystickRect.top + joystickRect.height / 2 };
                         
                         let dx = x - center.x;
                         let dy = y - center.y;
                         const dist = Math.sqrt(dx*dx + dy*dy);
-                        
                         const maxDist = joystickRect.width / 2;
                         
+                        // ジョイスティックの見た目を更新
                         if (dist > maxDist) {
                             dx = (dx / dist) * maxDist;
                             dy = (dy / dist) * maxDist;
                         }
-                        
                         joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
 
-                        const angle = Math.atan2(dy, dx);
-                        const strength = Math.min(dist / (maxDist * 0.8), 1.0); 
+                        // 入力値の計算: 最大距離で割って -1.0 ~ 1.0 に正規化
+                        const normX = dx / maxDist;
+                        const normY = dy / maxDist;
                         
-                        const moveThreshold = 0.3; 
-                        
-                        // 移動方向のフラグ設定: 角度はスクリーン座標のY軸が下向きで正
-                        moveForward = strength > moveThreshold && (angle > -2.356 && angle < -0.785); // 上方向
-                        moveBackward = strength > moveThreshold && (angle > 0.785 && angle < 2.356);  // 下方向
-                        moveLeft = strength > moveThreshold && (angle <= -2.356 || angle > 2.356);    // 左方向
-                        moveRight = strength > moveThreshold && (angle > -0.785 && angle < 0.785);    // 右方向
+                        // デッドゾーン (少し遊びを作る)
+                        const deadzone = 0.1;
+                        joystickInput.x = Math.abs(normX) > deadzone ? normX : 0;
+                        joystickInput.y = Math.abs(normY) > deadzone ? normY : 0;
 
-                        isSprinting = moveForward && strength > 0.8;
+                        // スプリント判定
+                        const strength = Math.min(dist / maxDist, 1.0);
+                        if (mobileDashMode) {
+                            isSprinting = true;
+                        } else {
+                            // スティックを8割以上倒し、かつ前方向(y < 0)の場合のみスプリント
+                            isSprinting = strength > 0.8 && normY < -0.3;
+                        }
                     } 
                     
-                    // --- 視点移動 (カメラ) ---
+                    // --- Camera Logic ---
                     else if (touch.identifier === activeTouch.camera) {
                         const prevX = parseFloat(cameraControls.dataset.prevX);
                         const prevY = parseFloat(cameraControls.dataset.prevY);
-
-                        // 感度調整用の乗数 (0.005 * 20 = 0.1 の実効感度)
-                        const sensitivity = 0.005; 
+                        const sensitivity = 0.002; 
 
                         const dx = (x - prevX) * sensitivity;
                         const dy = (y - prevY) * sensitivity;
 
-                        // 横方向の回転（Y軸）はプレイヤーボディを回転させる
                         playerBody.rotation.y -= dx * SENSITIVITY_MULTIPLIER; 
-
-                        // 縦方向の回転（X軸）はカメラを回転させる
                         const cam = camera;
                         cam.rotation.x -= dy * SENSITIVITY_MULTIPLIER; 
-                        
-                        // 上下制限
                         cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
 
                         cameraControls.dataset.prevX = x;
@@ -454,20 +479,18 @@
                 }
             }, { passive: false });
             
-            // タッチ終了時の処理
             controlsRoot.addEventListener('touchend', (e) => {
                 for (let i = 0; i < e.changedTouches.length; i++) {
                     const touch = e.changedTouches[i];
                     
-                    // ジョイスティック終了
                     if (touch.identifier === activeTouch.joystick) {
                         activeTouch.joystick = null;
                         joystickThumb.style.transform = `translate(-50%, -50%)`;
-                        moveForward = moveBackward = moveLeft = moveRight = false;
-                        isSprinting = false;
+                        joystickInput.x = 0;
+                        joystickInput.y = 0;
+                        if (!mobileDashMode) isSprinting = false;
                     }
                     
-                    // カメラ操作終了
                     else if (touch.identifier === activeTouch.camera) {
                         activeTouch.camera = null;
                         delete cameraControls.dataset.prevX;
@@ -476,7 +499,6 @@
                 }
             });
 
-            // ウィンドウリサイズ時のジョイスティックエリア再計算
             window.addEventListener('resize', () => {
                 joystickRect = joystickArea.getBoundingClientRect();
             });
@@ -524,10 +546,7 @@
 
         function getNoiseHeight(x, z) {
             const dist = Math.sqrt(x * x + z * z);
-            
-            let baseHeight = 0;
-            baseHeight += Math.abs(perlin.noise(x * 0.003 + seed, z * 0.003 + seed, seed)) * 30;
-
+            let baseHeight = Math.abs(perlin.noise(x * 0.003 + seed, z * 0.003 + seed, seed)) * 30;
             let finalHeight = baseHeight;
 
             if (dist < BASIN_WALL_END) {
@@ -535,12 +554,10 @@
                     let h = 32 + perlin.noise(x * 0.008, z * 0.008, seed) * 10;
                     const riverNoise = perlin.noise(x * 0.004 + seed, z * 0.004 + seed, seed + 10);
                     if (riverNoise < -0.15) {
-                        const depth = (-0.15 - riverNoise) * 60; 
-                        h -= depth; 
+                        h -= (-0.15 - riverNoise) * 60; 
                     }
                     if (dist < 180) {
-                        const lakeDepth = (1.0 - (dist / 180)) * 25;
-                        h -= lakeDepth;
+                        h -= (1.0 - (dist / 180)) * 25;
                     }
                     finalHeight = h;
                 } else {
@@ -553,8 +570,7 @@
                         wallFactor = 1 - (t * t * (3 - 2 * t)); 
                     }
                     const mountainNoise = Math.abs(perlin.noise(x * 0.02, z * 0.02, seed + 50)) * 180;
-                    const wallHeight = (WALL_HEIGHT + mountainNoise) * wallFactor;
-                    finalHeight = baseHeight + wallHeight;
+                    finalHeight = baseHeight + (WALL_HEIGHT + mountainNoise) * wallFactor;
                     if (dist < BASIN_PEAK_DIST && finalHeight < 30) finalHeight = 30; 
                 }
             } else {
@@ -564,27 +580,17 @@
 
                 const biomeNoise = perlin.noise(x * 0.0004, z * 0.0004, seed + 100);
                 const mountainMix = THREE.MathUtils.smoothstep(biomeNoise, 0.2, 0.6);
-
                 const largeMtn = Math.abs(perlin.noise(x * 0.0015, z * 0.0015, seed + 10)) * 1200;
                 const detailMtn = perlin.noise(x * 0.01, z * 0.01, seed + 20) * 150;
                 const mountainShape = largeMtn + detailMtn;
-
                 const hillBase = perlin.noise(x * 0.001, z * 0.001, seed + 30) * 60; 
                 const hillDetail = perlin.noise(x * 0.005, z * 0.005, seed + 40) * 20;
-                
                 const riverCarver = Math.abs(perlin.noise(x * 0.0005 + 500, z * 0.0005 + 500, seed + 60));
-                let riverDepth = 0;
-                if (riverCarver < 0.1) {
-                    riverDepth = (0.1 - riverCarver) * 800; 
-                }
-
+                let riverDepth = riverCarver < 0.1 ? (0.1 - riverCarver) * 800 : 0;
                 const plainShape = 35 + hillBase + hillDetail - riverDepth;
-
                 let outerTerrain = (mountainShape * mountainMix) + (plainShape * (1 - mountainMix));
-
                 finalHeight = baseHeight + (outerTerrain * blend);
             }
-            
             return finalHeight; 
         }
 
@@ -603,7 +609,6 @@
             const cx = Math.floor(playerPos.x / chunkSize);
             const cz = Math.floor(playerPos.z / chunkSize);
             const activeKeys = new Set();
-
             for (let x = -renderDistance; x <= renderDistance; x++) {
                 for (let z = -renderDistance; z <= renderDistance; z++) {
                     const key = `${cx + x},${cz + z}`;
@@ -621,7 +626,6 @@
 
         function createChunk(cx, cz) {
             const group = new THREE.Group();
-            
             const geometry = new THREE.PlaneGeometry(chunkSize, chunkSize, chunkRes, chunkRes);
             geometry.rotateX(-Math.PI / 2);
             const posAttr = geometry.attributes.position;
@@ -632,29 +636,17 @@
                 const z = posAttr.getZ(i) + (cz * chunkSize);
                 const y = getNoiseHeight(x, z);
                 posAttr.setY(i, y);
-
-                if (y < waterLevel + 3) {
-                    colors.push(0.85, 0.8, 0.65);
-                } else if (y < 120) {
+                if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
+                else if (y < 120) {
                     const n = perlin.noise(x*0.02, z*0.02, seed);
-                    const r = 0.35 + n * 0.1;
-                    const g = 0.7 + n * 0.15;
-                    const b = 0.3 + n * 0.1;
-                    colors.push(r, g, b); 
-                } else if (y < 400) { 
-                    colors.push(0.6, 0.55, 0.5); 
-                } else { 
-                    colors.push(0.96, 0.98, 1.0); 
-                }
+                    colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
+                } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
+                else colors.push(0.96, 0.98, 1.0); 
             }
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             geometry.computeVertexNormals();
             
-            const terrainMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ 
-                vertexColors: true, 
-                flatShading: true, 
-                roughness: 1.0 
-            }));
+            const terrainMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1.0 }));
             terrainMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
             terrainMesh.receiveShadow = true;
             group.add(terrainMesh);
@@ -665,32 +657,21 @@
 
             const treeCount = 60; 
             const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
-            treeMesh.castShadow = true;
-            treeMesh.receiveShadow = true;
-            
+            treeMesh.castShadow = true; treeMesh.receiveShadow = true;
             const dummy = new THREE.Object3D();
             let tIdx = 0;
-            
             for (let i = 0; i < treeCount; i++) {
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const wx = rx + (cx * chunkSize);
-                const wz = rz + (cz * chunkSize);
-                
-                const h = getNoiseHeight(wx, wz);
-                const slope = getSlope(wx, wz);
-                
-                if (h > waterLevel + 4 && slope < 1.2) {
-                    if (h < 250) {
-                        if (Math.random() > 0.4) {
-                            dummy.position.set(rx, h, rz);
-                            const s = 0.8 + Math.random() * 1.0; 
-                            dummy.scale.set(s, s, s);
-                            dummy.rotation.y = Math.random() * Math.PI * 2;
-                            dummy.updateMatrix();
-                            treeMesh.setMatrixAt(tIdx++, dummy.matrix);
-                        }
-                    }
+                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
+                if (h > waterLevel + 4 && slope < 1.2 && h < 250 && Math.random() > 0.4) {
+                    dummy.position.set(rx, h, rz);
+                    const s = 0.8 + Math.random() * 1.0; 
+                    dummy.scale.set(s, s, s);
+                    dummy.rotation.y = Math.random() * Math.PI * 2;
+                    dummy.updateMatrix();
+                    treeMesh.setMatrixAt(tIdx++, dummy.matrix);
                 }
             }
             treeMesh.count = tIdx; 
@@ -703,11 +684,8 @@
             for (let i = 0; i < grassCount; i++) {
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const wx = rx + (cx * chunkSize);
-                const wz = rz + (cz * chunkSize);
-                const h = getNoiseHeight(wx, wz);
-                const slope = getSlope(wx, wz);
-
+                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
                 if (h > waterLevel + 2 && h < 250 && slope < 0.8) {
                     dummy.position.set(rx, h, rz);
                     dummy.scale.set(1, 1, 1);
@@ -730,84 +708,59 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function easeOutCubic(x) {
-            return 1 - Math.pow(1 - x, 3);
-        }
+        function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
 
         function handleGamepadInput() {
-            if (!gamepadConnected) return; // No gamepad, nothing to do.
-        
+            if (!gamepadConnected) return; 
             const gamepad = navigator.getGamepads()[0];
             if (!gamepad) return;
-        
-            // Deadzone for joysticks
             const deadzone = 0.15;
-        
-            // --- Left Stick for Movement (Overrides Keyboard) ---
+            
             const leftStickX = gamepad.axes[0];
             const leftStickY = gamepad.axes[1];
-        
             if (Math.abs(leftStickX) > deadzone || Math.abs(leftStickY) > deadzone) {
-                moveForward = leftStickY < -deadzone;
-                moveBackward = leftStickY > deadzone;
-                moveLeft = leftStickX < -deadzone;
-                moveRight = leftStickX > deadzone;
+                // Gamepad Analog Logic
+                direction.z = leftStickY < -deadzone ? 1 : (leftStickY > deadzone ? -1 : 0);
+                direction.x = leftStickX > deadzone ? 1 : (leftStickX < -deadzone ? -1 : 0);
+            } else if (!isMobile) {
+                moveForward = keyState['KeyW'] || false;
+                moveBackward = keyState['KeyS'] || false;
+                moveLeft = keyState['KeyA'] || false;
+                moveRight = keyState['KeyD'] || false;
             }
-        
-            // --- Right Stick for Camera ---
+            isSprinting = gamepad.buttons[10].pressed || keyState['ShiftLeft'] || false; 
+            
             const rightStickX = gamepad.axes[2];
             const rightStickY = gamepad.axes[3];
-            const sensitivity = 0.04;
-        
-            if (Math.abs(rightStickX) > deadzone) {
-                playerBody.rotation.y -= rightStickX * sensitivity * SENSITIVITY_MULTIPLIER;
-            }
+            const sensitivity = 0.02; 
+            if (Math.abs(rightStickX) > deadzone) playerBody.rotation.y -= rightStickX * sensitivity * SENSITIVITY_MULTIPLIER;
             if (Math.abs(rightStickY) > deadzone) {
                 const cam = camera;
-                cam.rotation.x += rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
+                cam.rotation.x -= rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
                 cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
             }
-        
-            // --- Buttons ---
-            // A button (button 0) for Jump
-            if (gamepad.buttons[0].pressed) {
-                if (canJump && !isRolling) {
-                    velocity.y += 160;
-                    canJump = false;
-                }
-            }
-            
-            // Left stick press (button 10) for Sprint (Additive to Keyboard)
-            if (gamepad.buttons[10].pressed) {
-                isSprinting = true;
+            if (gamepad.buttons[0].pressed && canJump && !isLandingAnimActive) {
+                velocity.y += 160;
+                canJump = false;
             }
         }
 
         function handleKeyboardInput() {
-            // Set base movement from keyboard. Gamepad will override if active.
+            if (isMobile || gamepadConnected) return;
             moveForward = keyState['KeyW'] || false;
             moveBackward = keyState['KeyS'] || false;
             moveLeft = keyState['KeyA'] || false;
             moveRight = keyState['KeyD'] || false;
-        
             isSprinting = keyState['ShiftLeft'] || false;
-        
-            if (keyState['Space']) {
-                if (canJump && !isRolling) {
-                    velocity.y += 160;
-                    canJump = false;
-                }
+            if (keyState['Space'] && canJump && !isLandingAnimActive) {
+                velocity.y += 160;
+                canJump = false;
             }
         }
 
-
-        // --- アニメーションループ ---
         function animate() {
             requestAnimationFrame(animate);
-
-            // First, set state from keyboard
             handleKeyboardInput();
-            // Then, override with gamepad if it's active
             handleGamepadInput();
 
             const time = performance.now();
@@ -815,50 +768,83 @@
             prevTime = time;
 
             if (sky) {
-                const uniforms = sky.material.uniforms;
-                const tempVec = new THREE.Vector3().copy(uniforms['sunPosition'].value).normalize();
+                const tempVec = new THREE.Vector3().copy(sky.material.uniforms['sunPosition'].value).normalize();
                 const dirLight = scene.children.find(c => c.isDirectionalLight);
-                if (dirLight) {
-                    dirLight.position.copy(tempVec).multiplyScalar(10000);
-                }
+                if (dirLight) dirLight.position.copy(tempVec).multiplyScalar(10000);
             }
 
             const gameActive = controls.isLocked || (isMobile && blocker.style.display === 'none');
 
             if (gameActive) {
                 updateChunks();
-
                 const body = playerBody;
-
                 const dampingX = canJump ? 8.0 : 1.0; 
                 const dampingZ = canJump ? 8.0 : 1.0;
-                
                 velocity.x -= velocity.x * dampingX * delta;
                 velocity.z -= velocity.z * dampingZ * delta;
                 velocity.y -= 9.8 * 60.0 * delta; 
 
-                // ジョイスティックのフラグから移動方向を決定
-                direction.z = Number(moveForward) - Number(moveBackward); // +1: Forward, -1: Backward
-                direction.x = Number(moveRight) - Number(moveLeft);      // +1: Right, -1: Left
-                direction.normalize();
+                // --- 移動方向の決定 ---
+                if (isMobile && activeTouch.joystick !== null) {
+                    // モバイル: ジョイスティック入力値をそのまま方向として使う
+                    // Joystick Y: 上が負、下が正。
+                    // PCロジック: 前進すると velocity.z を減らす(負にする)。
+                    // つまり、ジョイスティックを上に倒す(Y < 0) -> 前進したい -> velocity.z を減らしたい -> direction.z を正にしたい。
+                    // なので direction.z = -joystickInput.y (例: -(-1) = 1)
+                    direction.z = -joystickInput.y; 
+
+                    // Joystick X: 右が正、左が負。
+                    // PCロジック: 右へ行くと velocity.x を減らす(負にする)。
+                    // controls.moveRight は引数が負だと右へ行く(内部で-distance)。
+                    // つまり、ジョイスティックを右に倒す(X > 0) -> 右へ行きたい -> velocity.x を減らしたい -> direction.x を正にしたい。
+                    // なので direction.x = joystickInput.x
+                    direction.x = joystickInput.x;
+                } 
+                else if (!gamepadConnected) {
+                    // PC Keyboard
+                    direction.z = Number(moveForward) - Number(moveBackward);
+                    direction.x = Number(moveRight) - Number(moveLeft);
+                } 
+                else if (gamepadConnected) {
+                    // Gamepad logic is partly in handleGamepadInput, ensure consistency
+                    // (Gamepad part already writes to direction, no change needed)
+                }
+
+                if (direction.lengthSq() > 0) direction.normalize();
 
                 const speedBase = isSprinting ? 1200.0 : 600.0;
                 
-                if (!isRolling) {
-                    // ジョイスティック入力に応じてローカルのX/Z速度を更新
-                    if (moveForward || moveBackward) velocity.z -= direction.z * speedBase * delta;
-                    if (moveLeft || moveRight) velocity.x -= direction.x * speedBase * delta;
+                // --- 速度の更新 ---
+                // direction.z > 0 (前進入力) -> velocity.z を減らす -> velocity.z は負になる
+                // direction.x > 0 (右移動入力) -> velocity.x を減らす -> velocity.x は負になる
+                if (!isLandingAnimActive) {
+                    // 入力がある場合のみ加速
+                    if (isMobile ? (activeTouch.joystick !== null) : (moveForward || moveBackward || moveLeft || moveRight)) {
+                        velocity.z -= direction.z * speedBase * delta;
+                        velocity.x -= direction.x * speedBase * delta;
+                    }
                 }
 
+                // --- 座標の更新 (ローカル座標移動) ---
                 if (isMobile) {
-                    // モバイルデバイスの場合、プレイヤーのローカル座標系で直接移動させます
-                    playerBody.translateX(-velocity.x * delta);
-                    playerBody.translateZ(-velocity.z * delta);
+                    // モバイルもPCと同じく「向いている方向」に対して移動させる
+                    // playerBody.rotation.y によって回転しているので、translateX/Z を使えば勝手に視点方向に動く
+                    
+                    // X軸: velocity.x が負のとき右へ行く必要がある
+                    // translateX(d) は d>0 で右へ移動。
+                    // velocity.x は右移動で負になるので、-velocity.x を渡すと正になり右へ動く。正解。
+                    playerBody.translateX( -velocity.x * delta );
+
+                    // Z軸: velocity.z が負のとき前へ行く必要がある
+                    // translateZ(d) は d>0 で手前(後ろ)、d<0 で奥(前)へ移動。
+                    // velocity.z は前進で負になるので、そのまま渡せば奥へ動く。正解。
+                    playerBody.translateZ( velocity.z * delta );
                 } else {
-                    // PC時の移動計算
-                    controls.moveRight(-velocity.x * delta);
-                    controls.moveForward(-velocity.z * delta);
+                    // PC用 (PointerLockControlsの関数を使用)
+                    controls.moveRight( -velocity.x * delta );
+                    controls.moveForward( -velocity.z * delta );
                 }
+                
                 body.position.y += (velocity.y * delta); 
 
                 const groundHeight = getNoiseHeight(body.position.x, body.position.z);
@@ -866,14 +852,12 @@
                 if (body.position.y < groundHeight + standingEyeHeight) {
                     if (!canJump) { 
                         const fallSpeed = Math.abs(velocity.y);
-                        if (fallSpeed > rollThreshold) {
-                            isRolling = true;
-                            rollStartTime = time;
-                            // ロール時の速度計算：カメラの現在の向きを前方とする
+                        if (fallSpeed > landingAnimThreshold) {
+                            isLandingAnimActive = true;
+                            landingAnimStartTime = time;
                             const forwardDir = new THREE.Vector3();
                             camera.getWorldDirection(forwardDir);
-                            forwardDir.y = 0; 
-                            forwardDir.normalize();
+                            forwardDir.y = 0; forwardDir.normalize();
                             velocity.add(forwardDir.multiplyScalar(300)); 
                         } else {
                             camOffset.y -= Math.min(fallSpeed / 10, 5.0); 
@@ -884,59 +868,52 @@
                     canJump = true;
                 }
 
-                // --- カメラアニメーションの更新（共通） ---
-                let rollOffsetHeight = 0;
-                let rollRotationZ = 0;
+                let landingAnimOffsetHeight = 0;
+                camera.rotation.x -= landingAnimRotationX;
 
-                if (isRolling) {
-                    const elapsed = (time - rollStartTime) / 1000;
-                    if (elapsed < rollDuration) {
-                        const t = elapsed / rollDuration;
-                        const crouchDepth = Math.sin(t * Math.PI) * 8.5; 
-                        rollOffsetHeight = -crouchDepth;
-                        rollRotationZ = -2 * Math.PI * easeOutCubic(t);
+                if (isLandingAnimActive) {
+                    const elapsed = (time - landingAnimStartTime) / 1000;
+                    if (elapsed < landingAnimDuration) {
+                        const t = elapsed / landingAnimDuration;
+                        landingAnimOffsetHeight = -(Math.sin(t * Math.PI) * 8.5);
+                        landingAnimRotationX = -2 * Math.PI * easeOutCubic(t);
                     } else {
-                        isRolling = false;
+                        isLandingAnimActive = false;
+                        landingAnimRotationX = 0; 
                     }
                 }
 
                 const currentSpeed = Math.sqrt(velocity.x**2 + velocity.z**2);
-                if (canJump && !isRolling && currentSpeed > 5) {
+                if (canJump && !isLandingAnimActive && currentSpeed > 5) {
                     const frequency = isSprinting ? 16 : 11;
                     walkCycle += delta * frequency;
-                    const bobY = Math.sin(walkCycle) * (isSprinting ? 0.6 : 0.3);
-                    const bobX = Math.cos(walkCycle * 0.5) * (isSprinting ? 0.5 : 0.3);
-                    camOffset.y += (bobY - camOffset.y) * delta * 15;
-                    camOffset.x += (bobX - camOffset.x) * delta * 15;
+                    camOffset.y += (Math.sin(walkCycle) * (isSprinting ? 0.6 : 0.3) - camOffset.y) * delta * 15;
+                    camOffset.x += (Math.cos(walkCycle * 0.5) * (isSprinting ? 0.5 : 0.3) - camOffset.x) * delta * 15;
                 } else {
-                    const breath = Math.sin(time * 0.002) * 0.05;
-                    camOffset.y += (breath - camOffset.y) * delta * 5;
+                    camOffset.y += (Math.sin(time * 0.002) * 0.05 - camOffset.y) * delta * 5;
                     camOffset.x += (0 - camOffset.x) * delta * 5;
                 }
 
-                if (!isRolling) {
+                if (!isLandingAnimActive) {
                     let tiltTarget = 0;
-                    if (moveLeft) tiltTarget = 0.05;
-                    if (moveRight) tiltTarget = -0.05; 
+                    // Tilt logic with analog input support
+                    if (direction.x > 0.1) tiltTarget = -0.05; // 右移動で右に傾く
+                    if (direction.x < -0.1) tiltTarget = 0.05; // 左移動で左に傾く
                     if (isSprinting) tiltTarget *= 2.0;
-                    targetRollAngle += (tiltTarget - targetRollAngle) * delta * 10;
-                } else {
-                    targetRollAngle = 0;
-                }
+                    targetTiltAngle += (tiltTarget - targetTiltAngle) * delta * 10;
+                } else targetTiltAngle = 0;
 
-                // 目の高さにスタンディングハイトを適用
-                camera.position.y = standingEyeHeight + camOffset.y + rollOffsetHeight;
+                camera.position.y = standingEyeHeight + camOffset.y + landingAnimOffsetHeight;
                 camera.position.x = camOffset.x;
-                camera.rotation.z = rollRotationZ + targetRollAngle;
+                camera.rotation.z = targetTiltAngle; 
+                camera.rotation.x += landingAnimRotationX; 
                 
-                const targetFov = baseFov + (currentSpeed / 70) + (isRolling ? 20 : 0);
+                const targetFov = baseFov + (currentSpeed / 70) + (isLandingAnimActive ? 20 : 0);
                 camera.fov += (targetFov - camera.fov) * delta * 5.0;
                 camera.updateProjectionMatrix();
 
-                const speedEffect = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
-                speedLines.style.opacity = speedEffect;
+                speedLines.style.opacity = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
             }
-
             renderer.render(scene, camera);
         }
     </script>
