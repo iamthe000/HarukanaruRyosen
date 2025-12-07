@@ -23,6 +23,8 @@
         }
         #blocker {
             position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
             background-color: rgba(20, 10, 40, 0.2);
@@ -48,18 +50,71 @@
             box-shadow: inset 0 0 100px rgba(200,240,255,0.3);
             transition: opacity 0.1s;
         }
-        #mobile-controls { display: none; }
-        .joystick-area { position: absolute; bottom: 30px; left: 30px; width: 150px; height: 150px; background: rgba(255,255,255,0.2); border-radius: 50%; }
-        #joystick-thumb { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
-        #jump-button { position: absolute; bottom: 40px; right: 40px; width: 80px; height: 80px; background: rgba(255,255,255,0.3); border-radius: 50%; display:flex; justify-content:center; align-items:center; font-size: 14px; color: white; border: 2px solid white; }
-        #camera-controls { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        
+        /* --- Mobile Controls Styles --- */
+        #mobile-controls { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            display: none; 
+            touch-action: none; 
+        }
+        .joystick-area { 
+            position: absolute; 
+            bottom: 30px; 
+            left: 30px; 
+            width: 150px; 
+            height: 150px; 
+            background: rgba(255,255,255,0.2); 
+            border-radius: 50%; 
+        }
+        #joystick-thumb { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            width: 50px; 
+            height: 50px; 
+            background: rgba(255,255,255,0.5); 
+            border-radius: 50%; 
+            transform: translate(-50%, -50%); 
+        }
+        #jump-button { 
+            position: absolute; 
+            bottom: 40px; 
+            right: 40px; 
+            width: 80px; 
+            height: 80px; 
+            background: rgba(255,255,255,0.3); 
+            border-radius: 50%; 
+            display:flex; 
+            justify-content:center; 
+            align-items:center; 
+            font-size: 14px; 
+            color: white; 
+            border: 2px solid white; 
+        }
+        /* カメラ操作エリアを画面全体に設定し、ジョイスティックより下に配置 */
+        #camera-controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 9; 
+        }
+        .joystick-area, #jump-button {
+            z-index: 10; 
+        }
+
     </style>
 </head>
 <body>
     <div id="vignette"></div>
     <div id="speed-lines"></div>
     <div id="mobile-controls">
-        <div id="camera-controls"></div>
+        <div id="camera-controls"></div> 
         <div class="joystick-area">
             <div id="joystick-thumb"></div>
         </div>
@@ -69,7 +124,7 @@
         <div id="instructions">
             <h1>遥かなる稜線</h1>
             <p>
-                クリックして旅を始める<br><br>
+                クリックまたはタッチして旅を始める<br><br>
                 移動: <span class="key">W, A, S, D</span><br>
                 ダッシュ: <span class="key">Shift</span><br>
                 ジャンプ: <span class="key">Space</span><br>
@@ -158,6 +213,10 @@
         const FOG_COLOR = 0xcce0ff; 
 
         let isMobile = false;
+        let activeTouch = { joystick: null, camera: null }; 
+
+        // 視点感度調整用の定数
+        const SENSITIVITY_MULTIPLIER = 20; 
 
         init();
         animate();
@@ -167,7 +226,8 @@
             const instructions = document.getElementById('instructions');
             const mobileControls = document.getElementById('mobile-controls');
 
-            isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            // ユーザーエージェントベースのモバイル判定
+            isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
 
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0010); 
@@ -245,6 +305,7 @@
             });
 
             const onKeyDown = (e) => {
+                if (isMobile) return; 
                 switch (e.code) {
                     case 'KeyW': moveForward = true; break;
                     case 'KeyA': moveLeft = true; break;
@@ -260,6 +321,7 @@
                 }
             };
             const onKeyUp = (e) => {
+                if (isMobile) return; 
                 switch (e.code) {
                     case 'KeyW': moveForward = false; break;
                     case 'KeyA': moveLeft = false; break;
@@ -294,94 +356,136 @@
             const joystickArea = joystickThumb.parentElement;
             const jumpButton = document.getElementById('jump-button');
             const cameraControls = document.getElementById('camera-controls');
+            const controlsRoot = document.getElementById('mobile-controls'); 
 
-            let joystickActive = false;
-            let joystickStart = { x: 0, y: 0 };
-            let joystickCurrent = { x: 0, y: 0 };
+            let joystickRect = joystickArea.getBoundingClientRect();
             
-            joystickArea.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                joystickActive = true;
-                const touch = e.touches[0];
-                joystickStart.x = touch.clientX;
-                joystickStart.y = touch.clientY;
+            // タッチ開始時の処理
+            controlsRoot.addEventListener('touchstart', (e) => {
+                e.preventDefault(); 
+                
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+
+                    // ジョイスティックエリア判定
+                    if (joystickArea.contains(touch.target)) {
+                        
+                        if (activeTouch.joystick === null) {
+                            activeTouch.joystick = touch.identifier;
+                        }
+                    } 
+                    // ジャンプボタンエリア判定
+                    else if (jumpButton.contains(touch.target)) {
+                        if (canJump && !isRolling) {
+                            velocity.y += 160;
+                            canJump = false;
+                        }
+                    }
+                    // カメラ操作エリア判定
+                    else if (activeTouch.camera === null) {
+                        activeTouch.camera = touch.identifier;
+                        cameraControls.dataset.prevX = touch.clientX;
+                        cameraControls.dataset.prevY = touch.clientY;
+                    }
+                }
             }, { passive: false });
 
-            joystickArea.addEventListener('touchmove', (e) => {
+            // タッチ移動中の処理
+            controlsRoot.addEventListener('touchmove', (e) => {
                 e.preventDefault();
-                if (!joystickActive) return;
-                const touch = e.touches[0];
-                joystickCurrent.x = touch.clientX;
-                joystickCurrent.y = touch.clientY;
                 
-                const rect = joystickArea.getBoundingClientRect();
-                const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-                
-                let dx = joystickCurrent.x - center.x;
-                let dy = joystickCurrent.y - center.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                
-                const maxDist = rect.width / 2 - joystickThumb.width / 2;
-                
-                if (dist > maxDist) {
-                    dx = (dx / dist) * maxDist;
-                    dy = (dy / dist) * maxDist;
-                }
-                
-                joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    const x = touch.clientX;
+                    const y = touch.clientY;
 
-                const angle = Math.atan2(dy, dx);
-                const strength = dist / maxDist;
-                
-                moveForward = strength > 0.2 && (angle > -2.5 && angle < -0.5);
-                moveBackward = strength > 0.2 && (angle > 0.5 && angle < 2.5);
-                moveLeft = strength > 0.2 && (angle <= -2.5 || angle > 2.5);
-                moveRight = strength > 0.2 && (angle > -0.5 && angle < 0.5);
+                    // --- プレイヤー移動 (ジョイスティック) ---
+                    if (touch.identifier === activeTouch.joystick) {
+                        const center = { x: joystickRect.left + joystickRect.width / 2, y: joystickRect.top + joystickRect.height / 2 };
+                        
+                        let dx = x - center.x;
+                        let dy = y - center.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        
+                        const maxDist = joystickRect.width / 2;
+                        
+                        if (dist > maxDist) {
+                            dx = (dx / dist) * maxDist;
+                            dy = (dy / dist) * maxDist;
+                        }
+                        
+                        joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+
+                        const angle = Math.atan2(dy, dx);
+                        const strength = Math.min(dist / (maxDist * 0.8), 1.0); 
+                        
+                        const moveThreshold = 0.3; 
+                        
+                        // 移動方向のフラグ設定: 角度はスクリーン座標のY軸が下向きで正
+                        moveForward = strength > moveThreshold && (angle > -2.356 && angle < -0.785); // 上方向
+                        moveBackward = strength > moveThreshold && (angle > 0.785 && angle < 2.356);  // 下方向
+                        moveLeft = strength > moveThreshold && (angle <= -2.356 || angle > 2.356);    // 左方向
+                        moveRight = strength > moveThreshold && (angle > -0.785 && angle < 0.785);    // 右方向
+
+                        isSprinting = moveForward && strength > 0.8;
+                    } 
+                    
+                    // --- 視点移動 (カメラ) ---
+                    else if (touch.identifier === activeTouch.camera) {
+                        const prevX = parseFloat(cameraControls.dataset.prevX);
+                        const prevY = parseFloat(cameraControls.dataset.prevY);
+
+                        // 感度調整用の乗数 (0.005 * 20 = 0.1 の実効感度)
+                        const sensitivity = 0.005; 
+
+                        const dx = (x - prevX) * sensitivity;
+                        const dy = (y - prevY) * sensitivity;
+
+                        // 横方向の回転（Y軸）はプレイヤーボディを回転させる
+                        playerBody.rotation.y -= dx * SENSITIVITY_MULTIPLIER; 
+
+                        // 縦方向の回転（X軸）はカメラを回転させる
+                        const cam = camera;
+                        cam.rotation.x -= dy * SENSITIVITY_MULTIPLIER; 
+                        
+                        // 上下制限
+                        cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+
+                        cameraControls.dataset.prevX = x;
+                        cameraControls.dataset.prevY = y;
+                    }
+                }
             }, { passive: false });
             
-            joystickArea.addEventListener('touchend', () => {
-                joystickActive = false;
-                joystickThumb.style.transform = `translate(-50%, -50%)`;
-                moveForward = moveBackward = moveLeft = moveRight = false;
-            });
-
-            jumpButton.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                if (canJump && !isRolling) {
-                    velocity.y += 160;
-                    canJump = false;
+            // タッチ終了時の処理
+            controlsRoot.addEventListener('touchend', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    
+                    // ジョイスティック終了
+                    if (touch.identifier === activeTouch.joystick) {
+                        activeTouch.joystick = null;
+                        joystickThumb.style.transform = `translate(-50%, -50%)`;
+                        moveForward = moveBackward = moveLeft = moveRight = false;
+                        isSprinting = false;
+                    }
+                    
+                    // カメラ操作終了
+                    else if (touch.identifier === activeTouch.camera) {
+                        activeTouch.camera = null;
+                        delete cameraControls.dataset.prevX;
+                        delete cameraControls.dataset.prevY;
+                    }
                 }
             });
 
-            let cameraTouchStart = { x: 0, y: 0 };
-            let cameraTouchCurrent = { x: 0, y: 0 };
-
-            cameraControls.addEventListener('touchstart', (e) => {
-                const touch = e.touches[0];
-                cameraTouchStart.x = touch.clientX;
-                cameraTouchStart.y = touch.clientY;
-            });
-            cameraControls.addEventListener('touchmove', (e) => {
-                const touch = e.touches[0];
-                cameraTouchCurrent.x = touch.clientX;
-                cameraTouchCurrent.y = touch.clientY;
-
-                const dx = (cameraTouchCurrent.x - cameraTouchStart.x) * 0.005;
-                const dy = (cameraTouchCurrent.y - cameraTouchStart.y) * 0.005;
-
-                playerBody.rotation.y -= dx;
-
-                const cam = camera;
-                cam.rotation.x -= dy;
-                cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
-
-                cameraTouchStart.x = cameraTouchCurrent.x;
-                cameraTouchStart.y = cameraTouchCurrent.y;
+            // ウィンドウリサイズ時のジョイスティックエリア再計算
+            window.addEventListener('resize', () => {
+                joystickRect = joystickArea.getBoundingClientRect();
             });
         }
 
         function prepareAssets() {
-            // 木
             const trunkGeo = new THREE.CylinderGeometry(1, 2.5, 12, 6);
             trunkGeo.translate(0, 6, 0);
             const leavesGeo = new THREE.ConeGeometry(7, 18, 6);
@@ -398,7 +502,6 @@
                 emissiveIntensity: 0.2
             });
 
-            // 草
             grassGeometry = new THREE.PlaneGeometry(4, 4);
             grassGeometry.translate(0, 2, 0);
             grassMaterial = new THREE.MeshStandardMaterial({ 
@@ -409,7 +512,6 @@
                 emissiveIntensity: 0.1
             });
 
-            // 水
             waterGeometry = new THREE.PlaneGeometry(chunkSize, chunkSize);
             waterGeometry.rotateX(-Math.PI / 2);
             waterMaterial = new THREE.MeshStandardMaterial({
@@ -423,19 +525,15 @@
             });
         }
 
-        // --- ★地形生成ロジックの修正 ---
         function getNoiseHeight(x, z) {
             const dist = Math.sqrt(x * x + z * z);
             
-            // ベース地形（平原のゆらぎ）
             let baseHeight = 0;
             baseHeight += Math.abs(perlin.noise(x * 0.003 + seed, z * 0.003 + seed, seed)) * 30;
 
             let finalHeight = baseHeight;
 
-            // 盆地（聖域）と外側の処理
             if (dist < BASIN_WALL_END) {
-                // --- 内側エリア（変更なし） ---
                 if (dist < BASIN_FLAT_RADIUS) {
                     let h = 32 + perlin.noise(x * 0.008, z * 0.008, seed) * 10;
                     const riverNoise = perlin.noise(x * 0.004 + seed, z * 0.004 + seed, seed + 10);
@@ -449,7 +547,6 @@
                     }
                     finalHeight = h;
                 } else {
-                    // 崖（外輪山）
                     let wallFactor = 0;
                     if (dist < BASIN_PEAK_DIST) {
                         const t = (dist - BASIN_WALL_START) / (BASIN_PEAK_DIST - BASIN_WALL_START);
@@ -464,53 +561,31 @@
                     if (dist < BASIN_PEAK_DIST && finalHeight < 30) finalHeight = 30; 
                 }
             } else {
-                // --- ★外側エリアの生成ロジック変更 ---
-                
-                // 1. 盆地からのブレンド係数
                 let blend = (dist - BASIN_WALL_END) / 1500;
                 if (blend > 1.0) blend = 1.0;
                 blend = blend * blend * (3 - 2 * blend); 
 
-                // 2. バイオーム決定ノイズ (大規模な地域の区分け)
-                // 低周波ノイズを使って、「山岳地帯」と「平原・丘陵地帯」を分ける
-                // 値が大きい＝山、小さい＝平原・湖
                 const biomeNoise = perlin.noise(x * 0.0004, z * 0.0004, seed + 100);
-                
-                // 山岳地帯の係数（0.3以上で山になり始める、なめらかに補間）
                 const mountainMix = THREE.MathUtils.smoothstep(biomeNoise, 0.2, 0.6);
 
-                // --- 山岳バイオーム ---
                 const largeMtn = Math.abs(perlin.noise(x * 0.0015, z * 0.0015, seed + 10)) * 1200;
                 const detailMtn = perlin.noise(x * 0.01, z * 0.01, seed + 20) * 150;
                 const mountainShape = largeMtn + detailMtn;
 
-                // --- 平原・丘陵バイオーム ---
-                // なだらかな丘、そして水面(22)より下がる部分を作ることで湖や川にする
-                // 基本高さを水面より少し上(40付近)に設定し、ノイズで±50くらい揺らす
                 const hillBase = perlin.noise(x * 0.001, z * 0.001, seed + 30) * 60; 
                 const hillDetail = perlin.noise(x * 0.005, z * 0.005, seed + 40) * 20;
                 
-                // 川・谷を削るノイズ (0に近いほど深い谷)
                 const riverCarver = Math.abs(perlin.noise(x * 0.0005 + 500, z * 0.0005 + 500, seed + 60));
                 let riverDepth = 0;
                 if (riverCarver < 0.1) {
-                    // 川の深さ
                     riverDepth = (0.1 - riverCarver) * 800; 
                 }
 
-                // 平原の基本形状 (水面近く)
                 const plainShape = 35 + hillBase + hillDetail - riverDepth;
 
-                // --- バイオームの合成 ---
-                // 山と平原を混ぜる
                 let outerTerrain = (mountainShape * mountainMix) + (plainShape * (1 - mountainMix));
 
-                // 盆地との接続（ブレンド）
-                // 盆地の外側すぐは平原から始めたいので、blendを考慮
-                // baseHeight(0付近) + 生成地形
                 finalHeight = baseHeight + (outerTerrain * blend);
-
-                // 注: ここで seaLevel 以下にならないような clamp 処理は削除し、湖ができるようにする
             }
             
             return finalHeight; 
@@ -561,22 +636,17 @@
                 const y = getNoiseHeight(x, z);
                 posAttr.setY(i, y);
 
-                // 色付けロジック
                 if (y < waterLevel + 3) {
-                    // 砂浜・川岸
                     colors.push(0.85, 0.8, 0.65);
                 } else if (y < 120) {
-                    // 緑の草原エリア（以前より範囲を拡大）
                     const n = perlin.noise(x*0.02, z*0.02, seed);
                     const r = 0.35 + n * 0.1;
                     const g = 0.7 + n * 0.15;
                     const b = 0.3 + n * 0.1;
                     colors.push(r, g, b); 
                 } else if (y < 400) { 
-                    // 岩肌
                     colors.push(0.6, 0.55, 0.5); 
                 } else { 
-                    // 雪山
                     colors.push(0.96, 0.98, 1.0); 
                 }
             }
@@ -592,12 +662,11 @@
             terrainMesh.receiveShadow = true;
             group.add(terrainMesh);
 
-            // 水面（エリア制限を撤廃し、全チャンクに生成）
             const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
             waterMesh.position.set(cx * chunkSize, waterLevel, cz * chunkSize);
             group.add(waterMesh);
 
-            const treeCount = 60; // 木の密度を少し上げる
+            const treeCount = 60; 
             const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
             treeMesh.castShadow = true;
             treeMesh.receiveShadow = true;
@@ -614,11 +683,8 @@
                 const h = getNoiseHeight(wx, wz);
                 const slope = getSlope(wx, wz);
                 
-                // 水中には木を生やさない (waterLevel + 4)
                 if (h > waterLevel + 4 && slope < 1.2) {
-                    // 高度制限: 平地や低い丘に木を集中させる
                     if (h < 250) {
-                        // ランダム配置
                         if (Math.random() > 0.4) {
                             dummy.position.set(rx, h, rz);
                             const s = 0.8 + Math.random() * 1.0; 
@@ -671,6 +737,7 @@
             return 1 - Math.pow(1 - x, 3);
         }
 
+        // --- アニメーションループ ---
         function animate() {
             requestAnimationFrame(animate);
 
@@ -701,32 +768,43 @@
                 velocity.z -= velocity.z * dampingZ * delta;
                 velocity.y -= 9.8 * 60.0 * delta; 
 
-                direction.z = Number(moveForward) - Number(moveBackward);
-                direction.x = Number(moveRight) - Number(moveLeft);
+                // ジョイスティックのフラグから移動方向を決定
+                direction.z = Number(moveForward) - Number(moveBackward); // +1: Forward, -1: Backward
+                direction.x = Number(moveRight) - Number(moveLeft);      // +1: Right, -1: Left
                 direction.normalize();
 
                 const speedBase = isSprinting ? 1200.0 : 600.0;
                 
                 if (!isRolling) {
+                    // ジョイスティック入力に応じてローカルのX/Z速度を更新
                     if (moveForward || moveBackward) velocity.z -= direction.z * speedBase * delta;
                     if (moveLeft || moveRight) velocity.x -= direction.x * speedBase * delta;
                 }
 
                 if (isMobile) {
-                    const forward = new THREE.Vector3();
-                    camera.getWorldDirection(forward);
-                    forward.y = 0;
-                    forward.normalize();
-                    
-                    const right = new THREE.Vector3();
-                    right.crossVectors(camera.up, forward).normalize();
+                    // *** 修正されたモバイル時のプレイヤー移動ロジック (軸マッピングの修正) ***
 
-                    const moveDir = new THREE.Vector3();
-                    moveDir.add(forward.multiplyScalar(-velocity.z * delta));
-                    moveDir.add(right.multiplyScalar(-velocity.x * delta));
-                    body.position.add(moveDir);
+                    const vx = velocity.x; // Strafe velocity (Local X)
+                    const vz = velocity.z; // Forward/Backward velocity (Local Z)
+
+                    // プレイヤーボディのY軸回転（Yaw）を取得
+                    const rotationY = playerBody.rotation.y;
+                    const cosY = Math.cos(rotationY);
+                    const sinY = Math.sin(rotationY);
+                    
+                    // 2D回転行列を適用してワールド速度に変換
+                    // プレイヤーローカルのX軸速度(vx)とZ軸速度(vz)を、現在の回転(rotationY)に基づいてワールド座標に変換する
+                    // X' = X*cos(Y) - Z*sin(Y)  <- 軸と符号を修正
+                    // Z' = X*sin(Y) + Z*cos(Y)
+                    const rotatedVX = vx * cosY - vz * sinY;
+                    const rotatedVZ = vx * sinY + vz * cosY;
+
+                    // 変換された速度を適用 (velocityは負の方向に蓄積されるため、-を乗算)
+                    body.position.x += -rotatedVX * delta;
+                    body.position.z += -rotatedVZ * delta;
 
                 } else {
+                    // PC時の移動計算
                     controls.moveRight(-velocity.x * delta);
                     controls.moveForward(-velocity.z * delta);
                 }
@@ -740,8 +818,11 @@
                         if (fallSpeed > rollThreshold) {
                             isRolling = true;
                             rollStartTime = time;
-                            const forwardDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
-                            forwardDir.y = 0; forwardDir.normalize();
+                            // ロール時の速度計算：カメラの現在の向きを前方とする
+                            const forwardDir = new THREE.Vector3();
+                            camera.getWorldDirection(forwardDir);
+                            forwardDir.y = 0; 
+                            forwardDir.normalize();
                             velocity.add(forwardDir.multiplyScalar(300)); 
                         } else {
                             camOffset.y -= Math.min(fallSpeed / 10, 5.0); 
@@ -752,6 +833,7 @@
                     canJump = true;
                 }
 
+                // --- カメラアニメーションの更新（共通） ---
                 let rollOffsetHeight = 0;
                 let rollRotationZ = 0;
 
@@ -791,7 +873,8 @@
                     targetRollAngle = 0;
                 }
 
-                camera.position.y = camOffset.y + rollOffsetHeight;
+                // 目の高さにスタンディングハイトを適用
+                camera.position.y = standingEyeHeight + camOffset.y + rollOffsetHeight;
                 camera.position.x = camOffset.x;
                 camera.rotation.z = rollRotationZ + targetRollAngle;
                 
