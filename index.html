@@ -215,11 +215,25 @@
         let isMobile = false;
         let activeTouch = { joystick: null, camera: null }; 
 
+        // --- Gamepad State ---
+        let gamepadConnected = false;
+        const keyState = {}; // Tracks keyboard key presses
+
         // 視点感度調整用の定数
         const SENSITIVITY_MULTIPLIER = 20; 
 
         init();
         animate();
+
+        window.addEventListener("gamepadconnected", (event) => {
+            console.log("Gamepad connected:", event.gamepad.id);
+            gamepadConnected = true;
+        });
+
+        window.addEventListener("gamepaddisconnected", (event) => {
+            console.log("Gamepad disconnected:", event.gamepad.id);
+            gamepadConnected = false;
+        });
 
         function init() {
             blocker = document.getElementById('blocker');
@@ -305,30 +319,13 @@
             });
 
             const onKeyDown = (e) => {
-                if (isMobile) return; 
-                switch (e.code) {
-                    case 'KeyW': moveForward = true; break;
-                    case 'KeyA': moveLeft = true; break;
-                    case 'KeyS': moveBackward = true; break;
-                    case 'KeyD': moveRight = true; break;
-                    case 'ShiftLeft': isSprinting = true; break;
-                    case 'Space': 
-                        if (canJump && !isRolling) {
-                            velocity.y += 160; 
-                            canJump = false;
-                        }
-                        break;
-                }
+                if (isMobile) return;
+                keyState[e.code] = true;
             };
+
             const onKeyUp = (e) => {
-                if (isMobile) return; 
-                switch (e.code) {
-                    case 'KeyW': moveForward = false; break;
-                    case 'KeyA': moveLeft = false; break;
-                    case 'KeyS': moveBackward = false; break;
-                    case 'KeyD': moveRight = false; break;
-                    case 'ShiftLeft': isSprinting = false; break;
-                }
+                if (isMobile) return;
+                keyState[e.code] = false;
             };
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
@@ -737,9 +734,81 @@
             return 1 - Math.pow(1 - x, 3);
         }
 
+        function handleGamepadInput() {
+            if (!gamepadConnected) return; // No gamepad, nothing to do.
+        
+            const gamepad = navigator.getGamepads()[0];
+            if (!gamepad) return;
+        
+            // Deadzone for joysticks
+            const deadzone = 0.15;
+        
+            // --- Left Stick for Movement (Overrides Keyboard) ---
+            const leftStickX = gamepad.axes[0];
+            const leftStickY = gamepad.axes[1];
+        
+            if (Math.abs(leftStickX) > deadzone || Math.abs(leftStickY) > deadzone) {
+                moveForward = leftStickY < -deadzone;
+                moveBackward = leftStickY > deadzone;
+                moveLeft = leftStickX < -deadzone;
+                moveRight = leftStickX > deadzone;
+            }
+        
+            // --- Right Stick for Camera ---
+            const rightStickX = gamepad.axes[2];
+            const rightStickY = gamepad.axes[3];
+            const sensitivity = 0.04;
+        
+            if (Math.abs(rightStickX) > deadzone) {
+                playerBody.rotation.y -= rightStickX * sensitivity * SENSITIVITY_MULTIPLIER;
+            }
+            if (Math.abs(rightStickY) > deadzone) {
+                const cam = camera;
+                cam.rotation.x -= rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
+                cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+            }
+        
+            // --- Buttons ---
+            // A button (button 0) for Jump
+            if (gamepad.buttons[0].pressed) {
+                if (canJump && !isRolling) {
+                    velocity.y += 160;
+                    canJump = false;
+                }
+            }
+            
+            // Left stick press (button 10) for Sprint (Additive to Keyboard)
+            if (gamepad.buttons[10].pressed) {
+                isSprinting = true;
+            }
+        }
+
+        function handleKeyboardInput() {
+            // Set base movement from keyboard. Gamepad will override if active.
+            moveForward = keyState['KeyW'] || false;
+            moveBackward = keyState['KeyS'] || false;
+            moveLeft = keyState['KeyA'] || false;
+            moveRight = keyState['KeyD'] || false;
+        
+            isSprinting = keyState['ShiftLeft'] || false;
+        
+            if (keyState['Space']) {
+                if (canJump && !isRolling) {
+                    velocity.y += 160;
+                    canJump = false;
+                }
+            }
+        }
+
+
         // --- アニメーションループ ---
         function animate() {
             requestAnimationFrame(animate);
+
+            // First, set state from keyboard
+            handleKeyboardInput();
+            // Then, override with gamepad if it's active
+            handleGamepadInput();
 
             const time = performance.now();
             const delta = Math.min((time - prevTime) / 1000, 0.1); 
@@ -782,27 +851,9 @@
                 }
 
                 if (isMobile) {
-                    // *** 修正されたモバイル時のプレイヤー移動ロジック (軸マッピングの修正) ***
-
-                    const vx = velocity.x; // Strafe velocity (Local X)
-                    const vz = velocity.z; // Forward/Backward velocity (Local Z)
-
-                    // プレイヤーボディのY軸回転（Yaw）を取得
-                    const rotationY = playerBody.rotation.y;
-                    const cosY = Math.cos(rotationY);
-                    const sinY = Math.sin(rotationY);
-                    
-                    // 2D回転行列を適用してワールド速度に変換
-                    // プレイヤーローカルのX軸速度(vx)とZ軸速度(vz)を、現在の回転(rotationY)に基づいてワールド座標に変換する
-                    // X' = X*cos(Y) - Z*sin(Y)  <- 軸と符号を修正
-                    // Z' = X*sin(Y) + Z*cos(Y)
-                    const rotatedVX = vx * cosY - vz * sinY;
-                    const rotatedVZ = vx * sinY + vz * cosY;
-
-                    // 変換された速度を適用 (velocityは負の方向に蓄積されるため、-を乗算)
-                    body.position.x += -rotatedVX * delta;
-                    body.position.z += -rotatedVZ * delta;
-
+                    // モバイルデバイスの場合、プレイヤーのローカル座標系で直接移動させます
+                    playerBody.translateX(-velocity.x * delta);
+                    playerBody.translateZ(-velocity.z * delta);
                 } else {
                     // PC時の移動計算
                     controls.moveRight(-velocity.x * delta);
