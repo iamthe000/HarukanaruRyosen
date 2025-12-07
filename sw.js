@@ -1,7 +1,7 @@
 var CACHE_NAME = 'harukanaruryosen';
 var urlsToCache = [
-    '/apps/pwa/',
-    '/apps/pwa/index.html'
+    './',
+    './index.html'
 ];
 
 self.addEventListener('install', function(event) {
