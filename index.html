@@ -764,7 +764,7 @@
             }
             if (Math.abs(rightStickY) > deadzone) {
                 const cam = camera;
-                cam.rotation.x -= rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
+                cam.rotation.x += rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
                 cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
             }
         
