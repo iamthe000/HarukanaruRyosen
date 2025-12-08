@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>遥かなる稜線</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon192x192.png">
+    <link rel="icon" href="icon192x192.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #aaccff; }
+        #instructions {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.3);
+            color: white;
+            pointer-events: none;
+            text-align: center;
+            user-select: none;
+            backdrop-filter: blur(8px);
+        }
+        #blocker {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(20, 10, 40, 0.2);
+            z-index: 99;
+        }
+        h1 { margin: 0; font-size: 50px; text-shadow: 0 0 20px rgba(200,220,255,0.8); font-weight: lighter; letter-spacing: 4px; }
+        p { font-size: 18px; line-height: 1.6; text-shadow: 0 0 5px rgba(0,0,50,0.5); }
+        .key { font-weight: bold; color: #fff; border: 1px solid #fff; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.2); }
+        #vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 50%, rgba(50,20,80,0.3) 100%);
+            pointer-events: none;
+            z-index: 90;
+        }
+        #speed-lines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: transparent;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 91;
+            box-shadow: inset 0 0 100px rgba(200,240,255,0.3);
+            transition: opacity 0.1s;
+        }
+        
+        /* --- Mobile Controls Styles --- */
+        #mobile-controls { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            display: none; 
+            touch-action: none; 
+        }
+        .joystick-area { 
+            position: absolute; 
+            bottom: 30px; 
+            left: 30px; 
+            width: 150px; 
+            height: 150px; 
+            background: rgba(255,255,255,0.2); 
+            border-radius: 50%; 
+        }
+        #joystick-thumb { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            width: 50px; 
+            height: 50px; 
+            background: rgba(255,255,255,0.5); 
+            border-radius: 50%; 
+            transform: translate(-50%, -50%); 
+        }
+        #jump-button { 
+            position: absolute; 
+            bottom: 40px; 
+            right: 40px; 
+            width: 80px; 
+            height: 80px; 
+            background: rgba(255,255,255,0.3); 
+            border-radius: 50%; 
+            display:flex; 
+            justify-content:center; 
+            align-items:center; 
+            font-size: 14px; 
+            color: white; 
+            border: 2px solid white; 
+            user-select: none;
+        }
+        #dash-button {
+            position: absolute;
+            bottom: 140px;
+            right: 55px;
+            width: 50px;
+            height: 50px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            font-size: 10px;
+            color: white;
+            border: 2px solid white;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        #dash-button.active {
+            background: rgba(255, 200, 50, 0.8);
+            border-color: #ffeba7;
+            color: #331100;
+            font-weight: bold;
+        }
+        #camera-controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 9; 
+        }
+        .joystick-area, #jump-button, #dash-button {
+            z-index: 10; 
+        }
+
+        /* --- Character Creator Styles --- */
+        #menu-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 100;
+            user-select: none;
+            font-size: 14px;
+        }
+        #creator-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 5, 20, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 101;
+            display: none;
+            color: white;
+            font-family: sans-serif;
+        }
+        #creator-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        #editor-panel {
+            flex-grow: 1;
+            position: relative;
+        }
+        #creator-ui {
+            width: 350px;
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+            overflow-y: auto;
+        }
+        #creator-ui h2 {
+            margin-top: 0;
+            text-align: center;
+            letter-spacing: 2px;
+            font-weight: lighter;
+        }
+        .ui-section {
+            margin-bottom: 20px;
+        }
+        .ui-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .ui-section input, .ui-section select {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: white;
+            font-size: 16px;
+        }
+        #color-palette {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+            gap: 10px;
+        }
+        .color-box {
+            width: 100%;
+            padding-bottom: 100%; /* Aspect ratio 1:1 */
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border 0.2s;
+        }
+        .color-box.selected {
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 10px #00ffff;
+        }
+        #creator-actions {
+            display: flex;
+            justify-content: space-between;
+        }
+        #creator-actions button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #save-char-button {
+            background: #00aaff;
+            color: white;
+        }
+        #close-creator-button {
+            background: #555;
+            color: white;
+        }
+        #voxel-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="vignette"></div>
+    <div id="speed-lines"></div>
+
+    <div id="menu-button">キャラクリエイト</div>
+
+    <div id="creator-modal">
+        <div id="creator-container">
+            <div id="editor-panel">
+                <canvas id="voxel-canvas"></canvas>
+            </div>
+            <div id="creator-ui">
+                <h2>キャラクタークリエイト</h2>
+                
+                <div class="ui-section">
+                    <label for="char-name">名前</label>
+                    <input type="text" id="char-name" placeholder="キャラクター名">
+                </div>
+
+                <div class="ui-section">
+                    <label>編集ツール</label>
+                    <div id="color-palette"></div>
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-speed">移動速度</label>
+                    <input type="range" id="char-speed" min="0.5" max="3" value="1" step="0.1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-lifespan">寿命 (秒)</label>
+                    <input type="number" id="char-lifespan" min="10" max="1000" value="120">
+                </div>
+                
+                <div class="ui-section">
+                    <label for="repro-type">繁殖タイプ</label>
+                    <select id="repro-type">
+                        <option value="asexual">無性生殖</option>
+                        <option value="sexual">有性生殖</option>
+                        <option value="none">繁殖なし (初期リスのみ)</option>
+                    </select>
+                </div>
+
+                <div class="ui-section">
+                    <label for="repro-count">一回の繁殖で増える個体数</label>
+                    <input type="number" id="repro-count" min="1" max="10" value="1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="move-method">移動方法</label>
+                    <select id="move-method">
+                        <option value="random_walk">ランダムウォーク</option>
+                        <option value="still">静止</option>
+                    </select>
+                </div>
+
+                <div id="creator-actions">
+                    <button id="close-creator-button">閉じる</button>
+                    <button id="save-char-button">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-controls">
+        <div id="camera-controls"></div> 
+        <div class="joystick-area">
+            <div id="joystick-thumb"></div>
+        </div>
+        <div id="dash-button">DASH</div>
+        <div id="jump-button">JUMP</div>
+    </div>
+    <div id="blocker">
+        <div id="instructions">
+            <h1>遥かなる稜線</h1>
+            <p>
+                クリックまたはタッチして旅を始める<br><br>
+                移動: <span class="key">W, A, S, D</span><br>
+                ダッシュ: <span class="key">Shift</span><br>
+                ジャンプ: <span class="key">Space</span><br>
+                <br>
+                <span style="font-size: 14px; color: #ddeeff;">果てしなく続く平原と山脈</span>
+            </p>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+        import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+        import { Sky } from 'three/addons/objects/Sky.js';
+
+        // --- グローバル変数 ---
+        let camera, scene, renderer, controls;
+        let playerBody; 
+        let blocker;
+        let sky, sun;
+        
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let isSprinting = false;
+        let canJump = false;
+
+        let prevTime = performance.now();
+
+        // --- アクション・カメラ設定 ---
+        let walkCycle = 0;
+        const camOffset = { x: 0, y: 0 }; 
+        
+        let isLandingAnimActive = false;
+        let landingAnimStartTime = 0;
+        const landingAnimDuration = 0.65;
+        const landingAnimThreshold = 280;
+        let targetTiltAngle = 0;
+        let landingAnimRotationX = 0; 
+        
+        const baseFov = 100;
+        const standingEyeHeight = 10;
+        
+        // --- 地形設定 ---
+        const chunkSize = 400; 
+        const chunkRes = 40; 
+        const renderDistance = 3; 
+        const waterLevel = 22; 
+        const chunks = {};
+        const perlin = new ImprovedNoise();
+        const seed = Math.random() * 100;
+
+        // --- 盆地生成パラメータ ---
+        const BASIN_FLAT_RADIUS = 550;   
+        const BASIN_WALL_START = 550;    
+        const BASIN_PEAK_DIST = 1100;    
+        const BASIN_WALL_END = 1600;     
+        const WALL_HEIGHT = 500;         
+        
+        let treeGeometry, treeMaterial;
+        let grassGeometry, grassMaterial;
+        let waterGeometry, waterMaterial;
+
+        const speedLines = document.getElementById('speed-lines');
+
+        const skyUniforms = {
+            turbidity: 8,
+            rayleigh: 2,
+            mieCoefficient: 0.005,
+            mieDirectionalG: 0.8,
+            elevation: 25,
+            azimuth: 180,
+            exposure: 0.6
+        };
+
+        const FOG_COLOR = 0xcce0ff; 
+
+        let isMobile = false;
+        let activeTouch = { joystick: null, camera: null }; 
+        // モバイル入力用の正規化ベクトル (-1.0 ~ 1.0)
+        let joystickInput = { x: 0, y: 0 }; 
+        let mobileDashMode = false;
+
+        let gamepadConnected = false;
+        const keyState = {}; 
+
+        const SENSITIVITY_MULTIPLIER = 10; 
+
+        // --- Character Creator ---
+        let creator = {
+            isOpen: false,
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            voxels: [],
+            gridHelper: null,
+            selectedColor: 0x00ff00,
+            raycaster: new THREE.Raycaster(),
+            pointer: new THREE.Vector2(),
+            voxelMaterial: new THREE.MeshStandardMaterial({}),
+            voxelGeometry: new THREE.BoxGeometry(1, 1, 1),
+        };
+
+        const characterManager = {
+            characters: [],
+            activeInstances: [],
+            
+            spawnCharacter: (characterData) => {
+                const character = new THREE.Group();
+                
+                // Find the center of the character model
+                const center = new THREE.Vector3();
+                if (characterData.voxels.length > 0) {
+                    characterData.voxels.forEach(v => center.add(new THREE.Vector3(v.x, v.y, v.z)));
+                    center.divideScalar(characterData.voxels.length);
+                }
+
+                characterData.voxels.forEach(v => {
+                    const mat = new THREE.MeshStandardMaterial({ color: v.color, roughness: 0.8, flatShading: true });
+                    const mesh = new THREE.Mesh(creator.voxelGeometry, mat);
+                    mesh.position.set(v.x - center.x, v.y - center.y, v.z - center.z);
+                    character.add(mesh);
+                });
+
+                const spawnRadius = 80;
+                const spawnX = (Math.random() - 0.5) * spawnRadius;
+                const spawnZ = 50 + (Math.random() - 0.5) * spawnRadius;
+                const spawnY = getNoiseHeight(spawnX, spawnZ) + 5; // Add offset from ground
+                
+                character.position.set(spawnX, spawnY, spawnZ);
+                
+                const instance = {
+                    object3D: character,
+                    data: characterData,
+                    born: performance.now(),
+                    lastAction: 0,
+                    velocity: new THREE.Vector3()
+                };
+
+                characterManager.activeInstances.push(instance);
+                scene.add(character);
+            },
+
+            update: (delta, time) => {
+                const MAX_INSTANCES = 50; // Performance limit
+                const now = performance.now();
+
+                // 1. Update existing instances (movement, lifespan, reproduction)
+                for (let i = characterManager.activeInstances.length - 1; i >= 0; i--) {
+                    const instance = characterManager.activeInstances[i];
+                    const age = (now - instance.born) / 1000;
+
+                    // --- Lifespan Check ---
+                    if (age > instance.data.lifespan) {
+                        scene.remove(instance.object3D);
+                        // Basic cleanup
+                        instance.object3D.traverse(child => {
+                            if (child.isMesh) {
+                                child.geometry.dispose();
+                                child.material.dispose();
+                            }
+                        });
+                        characterManager.activeInstances.splice(i, 1);
+                        continue;
+                    }
+
+                    // --- Movement ---
+                    instance.velocity.y -= 9.8 * 2.0 * delta; // Apply gravity regardless of movement type
+                    if (instance.data.moveMethod === 'random_walk') {
+                        instance.object3D.position.add(instance.velocity.clone().multiplyScalar(delta));
+                    } else { // 'still' or other types only move vertically due to gravity
+                        instance.object3D.position.y += instance.velocity.y * delta;
+                    }
+
+                    const groundHeight = getNoiseHeight(instance.object3D.position.x, instance.object3D.position.z);
+                    if (instance.object3D.position.y < groundHeight) {
+                        instance.object3D.position.y = groundHeight;
+                        instance.velocity.y = 0;
+                        if (instance.data.moveMethod === 'random_walk') {
+                            instance.velocity.x *= 0.9; // Friction
+                            instance.velocity.z *= 0.9;
+                        }
+                    }
+
+                    // --- Behavior (Reproduction & Movement decisions) ---
+                    if (now - instance.lastAction > 3000 + Math.random() * 4000) { // Every 3-7 seconds
+                        instance.lastAction = now;
+
+                        // --- Reproduction Logic ---
+                        if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                            if (instance.data.reproduction === 'asexual') {
+                                for (let j = 0; j < instance.data.reproCount; j++) {
+                                    if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                        characterManager.spawnCharacter(instance.data);
+                                    }
+                                }
+                            } else if (instance.data.reproduction === 'sexual') {
+                                // Find a potential partner of the same species
+                                const partners = characterManager.activeInstances.filter(p =>
+                                    p !== instance && p.data.name === instance.data.name
+                                );
+                                if (partners.length > 0) {
+                                    const partner = partners[Math.floor(Math.random() * partners.length)];
+                                    // Check if they are close enough to reproduce
+                                    if (instance.object3D.position.distanceTo(partner.object3D.position) < 20) {
+                                         for (let j = 0; j < instance.data.reproCount; j++) {
+                                            if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                                characterManager.spawnCharacter(instance.data);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- Movement Direction Change ---
+                        if (instance.data.moveMethod === 'random_walk') {
+                            const angle = Math.random() * Math.PI * 2;
+                            const speed = instance.data.speed * 10;
+                            instance.velocity.x = Math.cos(angle) * speed;
+                            instance.velocity.z = Math.sin(angle) * speed;
+                            if (Math.random() > 0.5) instance.velocity.y = Math.random() * 5; // Little hop
+                        }
+                    }
+                }
+
+                // 2. Spawn new "infinite" characters from source
+                characterManager.characters.forEach(charData => {
+                    if (charData.reproduction === 'none' && characterManager.activeInstances.length < MAX_INSTANCES) {
+                        if (!charData.lastSpawn || (now - charData.lastSpawn > 10000)) { // Spawn every 10 seconds
+                            charData.lastSpawn = now;
+                            characterManager.spawnCharacter(charData);
+                        }
+                    }
+                });
+            },
+
+            saveCharacter: () => {
+                const name = document.getElementById('char-name').value;
+                if (!name.trim()) {
+                    alert('キャラクター名を入力してください。');
+                    return;
+                }
+                if (creator.voxels.length === 0) {
+                    alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+                    return;
+                }
+
+                const voxelData = creator.voxels.map(v => ({
+                    x: v.position.x,
+                    y: v.position.y,
+                    z: v.position.z,
+                    color: v.material.color.getHex()
+                }));
+
+                const newChar = {
+                    name: name,
+                    speed: parseFloat(document.getElementById('char-speed').value),
+                    lifespan: parseInt(document.getElementById('char-lifespan').value),
+                    reproduction: document.getElementById('repro-type').value,
+                    reproCount: parseInt(document.getElementById('repro-count').value),
+                    moveMethod: document.getElementById('move-method').value,
+                    voxels: voxelData
+                };
+                
+                characterManager.characters.push(newChar);
+                localStorage.setItem('voxelGameCharacters', JSON.stringify(characterManager.characters));
+                
+                characterManager.spawnCharacter(newChar);
+
+                alert(`キャラクター「${name}」が保存されました！`);
+                
+                // Reset creator
+                document.getElementById('char-name').value = '';
+                creator.voxels.forEach(v => creator.scene.remove(v));
+                creator.voxels = [];
+                document.getElementById('close-creator-button').click();
+            },
+
+            loadCharacters: () => {
+                const data = localStorage.getItem('voxelGameCharacters');
+                if (data) {
+                    characterManager.characters = JSON.parse(data);
+                    console.log(`${characterManager.characters.length} characters loaded.`);
+                }
+            }
+        };
+
+        init();
+        animate();
+
+        window.addEventListener("gamepadconnected", (event) => {
+            console.log("Gamepad connected:", event.gamepad.id);
+            gamepadConnected = true;
+        });
+
+        window.addEventListener("gamepaddisconnected", (event) => {
+            console.log("Gamepad disconnected:", event.gamepad.id);
+            gamepadConnected = false;
+        });
+
+        function init() {
+            blocker = document.getElementById('blocker');
+            const instructions = document.getElementById('instructions');
+            const mobileControls = document.getElementById('mobile-controls');
+
+            isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0010); 
+            scene.background = new THREE.Color(FOG_COLOR);
+
+            camera = new THREE.PerspectiveCamera(baseFov, window.innerWidth / window.innerHeight, 0.1, 8000);
+
+            playerBody = new THREE.Object3D();
+            playerBody.position.set(0, 100, 50); 
+            playerBody.add(camera); 
+            scene.add(playerBody);
+
+            // --- Sky ---
+            sky = new Sky();
+            sky.scale.setScalar(450000);
+            scene.add(sky);
+
+            sun = new THREE.Vector3();
+            
+            const effectController = skyUniforms;
+
+            const uniforms = sky.material.uniforms;
+            uniforms[ 'turbidity' ].value = effectController.turbidity;
+            uniforms[ 'rayleigh' ].value = effectController.rayleigh;
+            uniforms[ 'mieCoefficient' ].value = effectController.mieCoefficient;
+            uniforms[ 'mieDirectionalG' ].value = effectController.mieDirectionalG;
+
+            const phi = THREE.MathUtils.degToRad( 90 - effectController.elevation );
+            const theta = THREE.MathUtils.degToRad( effectController.azimuth );
+            sun.setFromSphericalCoords( 1, phi, theta );
+            uniforms[ 'sunPosition' ].value.copy( sun );
+
+            // --- Lighting ---
+            const dirLight = new THREE.DirectionalLight(0xfffaed, 1.5); 
+            dirLight.position.set(sun.x * 1000, sun.y * 1000, sun.z * 1000);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 4096;
+            dirLight.shadow.mapSize.height = 4096;
+            const d = 2500; 
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            dirLight.shadow.camera.far = 6000;
+            dirLight.shadow.bias = -0.0001;
+            dirLight.shadow.radius = 2; 
+            scene.add(dirLight);
+            
+            const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x6655aa, 0.85); 
+            hemiLight.position.set(0, 500, 0);
+            scene.add(hemiLight);
+
+            // --- Controls ---
+            controls = new PointerLockControls(playerBody, document.body);
+            controls.minPolarAngle = 0.05; 
+            controls.maxPolarAngle = Math.PI - 0.05;
+
+            function startExperience() {
+                instructions.style.display = 'none';
+                blocker.style.display = 'none';
+                if (isMobile) {
+                    mobileControls.style.display = 'block';
+                } else {
+                    controls.lock();
+                }
+            }
+
+            blocker.addEventListener('click', startExperience);
+            blocker.addEventListener('touchstart', startExperience);
+            
+            controls.addEventListener('unlock', () => {
+                blocker.style.display = 'block';
+                instructions.style.display = 'flex';
+                 if (isMobile) mobileControls.style.display = 'none';
+            });
+
+            const onKeyDown = (e) => {
+                if (isMobile) return;
+                keyState[e.code] = true;
+            };
+
+            const onKeyUp = (e) => {
+                if (isMobile) return;
+                keyState[e.code] = false;
+            };
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            if (isMobile) {
+                setupMobileControls();
+            }
+
+            prepareAssets();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            renderer.toneMapping = THREE.CineonToneMapping; 
+            renderer.toneMappingExposure = 0.9; 
+            
+            document.body.appendChild(renderer.domElement);
+            window.addEventListener('resize', onWindowResize);
+
+            characterManager.loadCharacters();
+            initCreator();
+        }
+
+        function initCreator() {
+            const menuButton = document.getElementById('menu-button');
+            const creatorModal = document.getElementById('creator-modal');
+            const closeButton = document.getElementById('close-creator-button');
+            const saveButton = document.getElementById('save-char-button');
+            const canvas = document.getElementById('voxel-canvas');
+
+            saveButton.addEventListener('click', characterManager.saveCharacter);
+
+            // --- Scene Setup ---
+            creator.scene = new THREE.Scene();
+            creator.scene.background = new THREE.Color(0x222233);
+            
+            const aLight = new THREE.AmbientLight(0xffffff, 0.6);
+            creator.scene.add(aLight);
+            const dLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dLight.position.set(10, 15, 5);
+            creator.scene.add(dLight);
+            
+            creator.camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            creator.camera.position.set(10, 10, 10);
+            
+            creator.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            creator.controls = new OrbitControls(creator.camera, creator.renderer.domElement);
+
+            // --- Grid & Floor ---
+            creator.gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x444444);
+            creator.scene.add(creator.gridHelper);
+            const floorGeo = new THREE.PlaneGeometry(20, 20);
+            floorGeo.rotateX(-Math.PI / 2);
+            const floorMat = new THREE.MeshBasicMaterial({ visible: false });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.name = 'floor';
+            creator.scene.add(floor);
+
+
+            menuButton.addEventListener('click', () => {
+                creator.isOpen = true;
+                creatorModal.style.display = 'block';
+                if (!isMobile) controls.unlock();
+                const panel = document.getElementById('editor-panel');
+                creator.camera.aspect = panel.clientWidth / panel.clientHeight;
+                creator.camera.updateProjectionMatrix();
+                creator.renderer.setSize(panel.clientWidth, panel.clientHeight);
+            });
+
+            closeButton.addEventListener('click', () => {
+                creator.isOpen = false;
+                creatorModal.style.display = 'none';
+            });
+            
+            // --- Color Palette ---
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffffff, 0x000000, 0xffa500, 0x800080, 0x32cd32, 0x8b4513, 'transparent'];
+            const palette = document.getElementById('color-palette');
+            colors.forEach(color => {
+                const colorBox = document.createElement('div');
+                colorBox.className = 'color-box';
+                if (color === 'transparent') {
+                    colorBox.style.background = 'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 10px 10px';
+                    colorBox.dataset.color = 'transparent';
+                } else {
+                    colorBox.style.backgroundColor = `#${color.toString(16).padStart(6, '0')}`;
+                    colorBox.dataset.color = color;
+                }
+                
+                if (color === creator.selectedColor) {
+                    colorBox.classList.add('selected');
+                }
+                colorBox.addEventListener('click', () => {
+                    creator.selectedColor = color;
+                    document.querySelectorAll('.color-box').forEach(box => box.classList.remove('selected'));
+                    colorBox.classList.add('selected');
+                });
+                palette.appendChild(colorBox);
+            });
+            
+            // --- Voxel Logic ---
+            const hoverCube = new THREE.Mesh(
+                new THREE.BoxGeometry(1.02, 1.02, 1.02),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+            );
+            creator.scene.add(hoverCube);
+
+            function getPointerPosition(event) {
+                const rect = canvas.getBoundingClientRect();
+                creator.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                creator.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointermove', (event) => {
+                getPointerPosition(event);
+                creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+                const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+
+                if (intersects.length > 0) {
+                    const intersect = intersects[0];
+                    const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal);
+                    pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+                    hoverCube.position.copy(pos);
+                    hoverCube.visible = true;
+                } else {
+                    hoverCube.visible = false;
+                }
+            });
+
+            canvas.addEventListener('pointerdown', (event) => {
+                getPointerPosition(event);
+                creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+                const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+                if (intersects.length === 0) return;
+
+                const intersect = intersects[0];
+                
+                if (event.button === 2 || event.ctrlKey || creator.selectedColor === 'transparent') { // Right-click, Ctrl+click or transparent color to remove
+                    if (intersect.object !== floor) {
+                        creator.scene.remove(intersect.object);
+                        creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+                    }
+                } else { // Left-click to add
+                    const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal);
+                    pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+
+                    // Prevent placing cube at the same spot
+                    if (creator.voxels.some(v => v.position.equals(pos))) return;
+
+                    const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+                    voxel.material.color.set(creator.selectedColor);
+                    voxel.position.copy(pos);
+                    creator.scene.add(voxel);
+                    creator.voxels.push(voxel);
+                }
+            });
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        }
+        
+        function setupMobileControls() {
+            const joystickThumb = document.getElementById('joystick-thumb');
+            const joystickArea = joystickThumb.parentElement;
+            const jumpButton = document.getElementById('jump-button');
+            const dashButton = document.getElementById('dash-button');
+            const cameraControls = document.getElementById('camera-controls');
+            const controlsRoot = document.getElementById('mobile-controls'); 
+
+            let joystickRect = joystickArea.getBoundingClientRect();
+            
+            controlsRoot.addEventListener('touchstart', (e) => {
+                e.preventDefault(); 
+                joystickRect = joystickArea.getBoundingClientRect();
+
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+
+                    if (joystickArea.contains(touch.target)) {
+                        if (activeTouch.joystick === null) {
+                            activeTouch.joystick = touch.identifier;
+                        }
+                    } 
+                    else if (jumpButton.contains(touch.target)) {
+                        if (canJump && !isLandingAnimActive) {
+                            velocity.y += 160;
+                            canJump = false;
+                        }
+                    }
+                    else if (dashButton.contains(touch.target)) {
+                        mobileDashMode = !mobileDashMode;
+                        if (mobileDashMode) {
+                            dashButton.classList.add('active');
+                        } else {
+                            dashButton.classList.remove('active');
+                        }
+                    }
+                    else if (activeTouch.camera === null) {
+                        activeTouch.camera = touch.identifier;
+                        cameraControls.dataset.prevX = touch.clientX;
+                        cameraControls.dataset.prevY = touch.clientY;
+                    }
+                }
+            }, { passive: false });
+
+            controlsRoot.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    const x = touch.clientX;
+                    const y = touch.clientY;
+
+                    // --- Joystick Logic ---
+                    if (touch.identifier === activeTouch.joystick) {
+                        const center = { x: joystickRect.left + joystickRect.width / 2, y: joystickRect.top + joystickRect.height / 2 };
+                        
+                        let dx = x - center.x;
+                        let dy = y - center.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        const maxDist = joystickRect.width / 2;
+                        
+                        // ジョイスティックの見た目を更新
+                        if (dist > maxDist) {
+                            dx = (dx / dist) * maxDist;
+                            dy = (dy / dist) * maxDist;
+                        }
+                        joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+
+                        // 入力値の計算: 最大距離で割って -1.0 ~ 1.0 に正規化
+                        const normX = dx / maxDist;
+                        const normY = dy / maxDist;
+                        
+                        // デッドゾーン (少し遊びを作る)
+                        const deadzone = 0.1;
+                        joystickInput.x = Math.abs(normX) > deadzone ? normX : 0;
+                        joystickInput.y = Math.abs(normY) > deadzone ? normY : 0;
+
+                        // スプリント判定
+                        const strength = Math.min(dist / maxDist, 1.0);
+                        if (mobileDashMode) {
+                            isSprinting = true;
+                        } else {
+                            // スティックを8割以上倒し、かつ前方向(y < 0)の場合のみスプリント
+                            isSprinting = strength > 0.8 && normY < -0.3;
+                        }
+                    } 
+                    
+                    // --- Camera Logic ---
+                    else if (touch.identifier === activeTouch.camera) {
+                        const prevX = parseFloat(cameraControls.dataset.prevX);
+                        const prevY = parseFloat(cameraControls.dataset.prevY);
+                        const sensitivity = 0.002; 
+
+                        const dx = (x - prevX) * sensitivity;
+                        const dy = (y - prevY) * sensitivity;
+
+                        playerBody.rotation.y -= dx * SENSITIVITY_MULTIPLIER; 
+                        const cam = camera;
+                        cam.rotation.x -= dy * SENSITIVITY_MULTIPLIER; 
+                        cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+
+                        cameraControls.dataset.prevX = x;
+                        cameraControls.dataset.prevY = y;
+                    }
+                }
+            }, { passive: false });
+            
+            controlsRoot.addEventListener('touchend', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    
+                    if (touch.identifier === activeTouch.joystick) {
+                        activeTouch.joystick = null;
+                        joystickThumb.style.transform = `translate(-50%, -50%)`;
+                        joystickInput.x = 0;
+                        joystickInput.y = 0;
+                        if (!mobileDashMode) isSprinting = false;
+                    }
+                    
+                    else if (touch.identifier === activeTouch.camera) {
+                        activeTouch.camera = null;
+                        delete cameraControls.dataset.prevX;
+                        delete cameraControls.dataset.prevY;
+                    }
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                joystickRect = joystickArea.getBoundingClientRect();
+            });
+        }
+
+        function prepareAssets() {
+            const trunkGeo = new THREE.CylinderGeometry(1, 2.5, 12, 6);
+            trunkGeo.translate(0, 6, 0);
+            const leavesGeo = new THREE.ConeGeometry(7, 18, 6);
+            leavesGeo.translate(0, 20, 0);
+            const leavesGeo2 = new THREE.ConeGeometry(5, 14, 6);
+            leavesGeo2.translate(0, 28, 0);
+            
+            treeGeometry = BufferGeometryUtils.mergeGeometries([trunkGeo, leavesGeo, leavesGeo2]);
+            treeMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x44bb66, 
+                flatShading: true, 
+                roughness: 0.8,
+                emissive: 0x002211,
+                emissiveIntensity: 0.2
+            });
+
+            grassGeometry = new THREE.PlaneGeometry(4, 4);
+            grassGeometry.translate(0, 2, 0);
+            grassMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x99dd55, 
+                side: THREE.DoubleSide, 
+                alphaTest: 0.5,
+                emissive: 0x113300,
+                emissiveIntensity: 0.1
+            });
+
+            waterGeometry = new THREE.PlaneGeometry(chunkSize, chunkSize);
+            waterGeometry.rotateX(-Math.PI / 2);
+            waterMaterial = new THREE.MeshStandardMaterial({
+                color: 0x22eeff,
+                transparent: true,
+                opacity: 0.7, 
+                roughness: 0.1,
+                metalness: 0.3,
+                emissive: 0x006688,
+                emissiveIntensity: 0.4
+            });
+        }
+
+        function getNoiseHeight(x, z) {
+            const dist = Math.sqrt(x * x + z * z);
+            let baseHeight = Math.abs(perlin.noise(x * 0.003 + seed, z * 0.003 + seed, seed)) * 30;
+            let finalHeight = baseHeight;
+
+            if (dist < BASIN_WALL_END) {
+                if (dist < BASIN_FLAT_RADIUS) {
+                    let h = 32 + perlin.noise(x * 0.008, z * 0.008, seed) * 10;
+                    const riverNoise = perlin.noise(x * 0.004 + seed, z * 0.004 + seed, seed + 10);
+                    if (riverNoise < -0.15) {
+                        h -= (-0.15 - riverNoise) * 60; 
+                    }
+                    if (dist < 180) {
+                        h -= (1.0 - (dist / 180)) * 25;
+                    }
+                    finalHeight = h;
+                } else {
+                    let wallFactor = 0;
+                    if (dist < BASIN_PEAK_DIST) {
+                        const t = (dist - BASIN_WALL_START) / (BASIN_PEAK_DIST - BASIN_WALL_START);
+                        wallFactor = t * t * (3 - 2 * t);
+                    } else {
+                        const t = (dist - BASIN_PEAK_DIST) / (BASIN_WALL_END - BASIN_PEAK_DIST);
+                        wallFactor = 1 - (t * t * (3 - 2 * t)); 
+                    }
+                    const mountainNoise = Math.abs(perlin.noise(x * 0.02, z * 0.02, seed + 50)) * 180;
+                    finalHeight = baseHeight + (WALL_HEIGHT + mountainNoise) * wallFactor;
+                    if (dist < BASIN_PEAK_DIST && finalHeight < 30) finalHeight = 30; 
+                }
+            } else {
+                let blend = (dist - BASIN_WALL_END) / 1500;
+                if (blend > 1.0) blend = 1.0;
+                blend = blend * blend * (3 - 2 * blend); 
+
+                const biomeNoise = perlin.noise(x * 0.0004, z * 0.0004, seed + 100);
+                const mountainMix = THREE.MathUtils.smoothstep(biomeNoise, 0.2, 0.6);
+                const largeMtn = Math.abs(perlin.noise(x * 0.0015, z * 0.0015, seed + 10)) * 1200;
+                const detailMtn = perlin.noise(x * 0.01, z * 0.01, seed + 20) * 150;
+                const mountainShape = largeMtn + detailMtn;
+                const hillBase = perlin.noise(x * 0.001, z * 0.001, seed + 30) * 60; 
+                const hillDetail = perlin.noise(x * 0.005, z * 0.005, seed + 40) * 20;
+                const riverCarver = Math.abs(perlin.noise(x * 0.0005 + 500, z * 0.0005 + 500, seed + 60));
+                let riverDepth = riverCarver < 0.1 ? (0.1 - riverCarver) * 800 : 0;
+                const plainShape = 35 + hillBase + hillDetail - riverDepth;
+                let outerTerrain = (mountainShape * mountainMix) + (plainShape * (1 - mountainMix));
+                finalHeight = baseHeight + (outerTerrain * blend);
+            }
+            return finalHeight; 
+        }
+
+        function getSlope(x, z) {
+            const step = 2;
+            const h = getNoiseHeight(x, z);
+            const hx = getNoiseHeight(x + step, z);
+            const hz = getNoiseHeight(x, z + step);
+            const dx = (hx - h) / step;
+            const dz = (hz - h) / step;
+            return Math.sqrt(dx*dx + dz*dz);
+        }
+
+        function updateChunks() {
+            const playerPos = playerBody.position;
+            const cx = Math.floor(playerPos.x / chunkSize);
+            const cz = Math.floor(playerPos.z / chunkSize);
+            const activeKeys = new Set();
+            for (let x = -renderDistance; x <= renderDistance; x++) {
+                for (let z = -renderDistance; z <= renderDistance; z++) {
+                    const key = `${cx + x},${cz + z}`;
+                    activeKeys.add(key);
+                    if (!chunks[key]) createChunk(cx + x, cz + z);
+                }
+            }
+            for (const key in chunks) {
+                if (!activeKeys.has(key)) {
+                    scene.remove(chunks[key]);
+                    delete chunks[key];
+                }
+            }
+        }
+
+        function createChunk(cx, cz) {
+            const group = new THREE.Group();
+            const geometry = new THREE.PlaneGeometry(chunkSize, chunkSize, chunkRes, chunkRes);
+            geometry.rotateX(-Math.PI / 2);
+            const posAttr = geometry.attributes.position;
+            const colors = [];
+
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i) + (cx * chunkSize);
+                const z = posAttr.getZ(i) + (cz * chunkSize);
+                const y = getNoiseHeight(x, z);
+                posAttr.setY(i, y);
+                if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
+                else if (y < 120) {
+                    const n = perlin.noise(x*0.02, z*0.02, seed);
+                    colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
+                } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
+                else colors.push(0.96, 0.98, 1.0); 
+            }
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.computeVertexNormals();
+            
+            const terrainMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1.0 }));
+            terrainMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+            terrainMesh.receiveShadow = true;
+            group.add(terrainMesh);
+
+            const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+            waterMesh.position.set(cx * chunkSize, waterLevel, cz * chunkSize);
+            group.add(waterMesh);
+
+            const treeCount = 60; 
+            const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
+            treeMesh.castShadow = true; treeMesh.receiveShadow = true;
+            const dummy = new THREE.Object3D();
+            let tIdx = 0;
+            for (let i = 0; i < treeCount; i++) {
+                const rx = (Math.random() - 0.5) * chunkSize;
+                const rz = (Math.random() - 0.5) * chunkSize;
+                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
+                if (h > waterLevel + 4 && slope < 1.2 && h < 250 && Math.random() > 0.4) {
+                    dummy.position.set(rx, h, rz);
+                    const s = 0.8 + Math.random() * 1.0; 
+                    dummy.scale.set(s, s, s);
+                    dummy.rotation.y = Math.random() * Math.PI * 2;
+                    dummy.updateMatrix();
+                    treeMesh.setMatrixAt(tIdx++, dummy.matrix);
+                }
+            }
+            treeMesh.count = tIdx; 
+            treeMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+            group.add(treeMesh);
+
+            const grassCount = 1200;
+            const grassMesh = new THREE.InstancedMesh(grassGeometry, grassMaterial, grassCount);
+            let gIdx = 0;
+            for (let i = 0; i < grassCount; i++) {
+                const rx = (Math.random() - 0.5) * chunkSize;
+                const rz = (Math.random() - 0.5) * chunkSize;
+                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
+                if (h > waterLevel + 2 && h < 250 && slope < 0.8) {
+                    dummy.position.set(rx, h, rz);
+                    dummy.scale.set(1, 1, 1);
+                    dummy.rotation.set(0, Math.random() * Math.PI, 0);
+                    dummy.updateMatrix();
+                    grassMesh.setMatrixAt(gIdx++, dummy.matrix);
+                }
+            }
+            grassMesh.count = gIdx;
+            grassMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+            group.add(grassMesh);
+
+            scene.add(group);
+            chunks[`${cx},${cz}`] = group;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+
+        function handleGamepadInput() {
+            if (!gamepadConnected) return; 
+            const gamepad = navigator.getGamepads()[0];
+            if (!gamepad) return;
+            const deadzone = 0.15;
+            
+            const leftStickX = gamepad.axes[0];
+            const leftStickY = gamepad.axes[1];
+            if (Math.abs(leftStickX) > deadzone || Math.abs(leftStickY) > deadzone) {
+                // Gamepad Analog Logic
+                direction.z = leftStickY < -deadzone ? 1 : (leftStickY > deadzone ? -1 : 0);
+                direction.x = leftStickX > deadzone ? 1 : (leftStickX < -deadzone ? -1 : 0);
+            } else if (!isMobile) {
+                moveForward = keyState['KeyW'] || false;
+                moveBackward = keyState['KeyS'] || false;
+                moveLeft = keyState['KeyA'] || false;
+                moveRight = keyState['KeyD'] || false;
+            }
+            isSprinting = gamepad.buttons[10].pressed || keyState['ShiftLeft'] || false; 
+            
+            const rightStickX = gamepad.axes[2];
+            const rightStickY = gamepad.axes[3];
+            const sensitivity = 0.02; 
+            if (Math.abs(rightStickX) > deadzone) playerBody.rotation.y -= rightStickX * sensitivity * SENSITIVITY_MULTIPLIER;
+            if (Math.abs(rightStickY) > deadzone) {
+                const cam = camera;
+                cam.rotation.x -= rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
+                cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+            }
+            if (gamepad.buttons[0].pressed && canJump && !isLandingAnimActive) {
+                velocity.y += 160;
+                canJump = false;
+            }
+        }
+
+        function handleKeyboardInput() {
+            if (isMobile || gamepadConnected) return;
+            moveForward = keyState['KeyW'] || false;
+            moveBackward = keyState['KeyS'] || false;
+            moveLeft = keyState['KeyA'] || false;
+            moveRight = keyState['KeyD'] || false;
+            isSprinting = keyState['ShiftLeft'] || false;
+            if (keyState['Space'] && canJump && !isLandingAnimActive) {
+                velocity.y += 160;
+                canJump = false;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            handleKeyboardInput();
+            handleGamepadInput();
+
+            const time = performance.now();
+            const delta = Math.min((time - prevTime) / 1000, 0.1); 
+            prevTime = time;
+
+            if (sky) {
+                const tempVec = new THREE.Vector3().copy(sky.material.uniforms['sunPosition'].value).normalize();
+                const dirLight = scene.children.find(c => c.isDirectionalLight);
+                if (dirLight) dirLight.position.copy(tempVec).multiplyScalar(10000);
+            }
+
+            const gameActive = controls.isLocked || (isMobile && blocker.style.display === 'none');
+
+            if (creator.isOpen) {
+                creator.controls.update();
+                creator.renderer.render(creator.scene, creator.camera);
+            }
+
+            if (gameActive) {
+                characterManager.update(delta, time);
+                updateChunks();
+                const body = playerBody;
+                const dampingX = canJump ? 8.0 : 1.0; 
+                const dampingZ = canJump ? 8.0 : 1.0;
+                velocity.x -= velocity.x * dampingX * delta;
+                velocity.z -= velocity.z * dampingZ * delta;
+                velocity.y -= 9.8 * 60.0 * delta; 
+
+                // --- 移動方向の決定 ---
+                if (isMobile && activeTouch.joystick !== null) {
+                    // モバイル: ジョイスティック入力値をそのまま方向として使う
+                    // Joystick Y: 上が負、下が正。
+                    // PCロジック: 前進すると velocity.z を減らす(負にする)。
+                    // つまり、ジョイスティックを上に倒す(Y < 0) -> 前進したい -> velocity.z を減らしたい -> direction.z を正にしたい。
+                    // なので direction.z = -joystickInput.y (例: -(-1) = 1)
+                    direction.z = -joystickInput.y; 
+
+                    // Joystick X: 右が正、左が負。
+                    // PCロジック: 右へ行くと velocity.x を減らす(負にする)。
+                    // controls.moveRight は引数が負だと右へ行く(内部で-distance)。
+                    // つまり、ジョイスティックを右に倒す(X > 0) -> 右へ行きたい -> velocity.x を減らしたい -> direction.x を正にしたい。
+                    // なので direction.x = joystickInput.x
+                    direction.x = joystickInput.x;
+                } 
+                else if (!gamepadConnected) {
+                    // PC Keyboard
+                    direction.z = Number(moveForward) - Number(moveBackward);
+                    direction.x = Number(moveRight) - Number(moveLeft);
+                } 
+                else if (gamepadConnected) {
+                    // Gamepad logic is partly in handleGamepadInput, ensure consistency
+                    // (Gamepad part already writes to direction, no change needed)
+                }
+
+                if (direction.lengthSq() > 0) direction.normalize();
+
+                const speedBase = isSprinting ? 1200.0 : 600.0;
+                
+                // --- 速度の更新 ---
+                // direction.z > 0 (前進入力) -> velocity.z を減らす -> velocity.z は負になる
+                // direction.x > 0 (右移動入力) -> velocity.x を減らす -> velocity.x は負になる
+                if (!isLandingAnimActive) {
+                    // 入力がある場合のみ加速
+                    if (isMobile ? (activeTouch.joystick !== null) : (moveForward || moveBackward || moveLeft || moveRight)) {
+                        velocity.z -= direction.z * speedBase * delta;
+                        velocity.x -= direction.x * speedBase * delta;
+                    }
+                }
+
+                // --- 座標の更新 (ローカル座標移動) ---
+                if (isMobile) {
+                    // モバイルもPCと同じく「向いている方向」に対して移動させる
+                    // playerBody.rotation.y によって回転しているので、translateX/Z を使えば勝手に視点方向に動く
+                    
+                    // X軸: velocity.x が負のとき右へ行く必要がある
+                    // translateX(d) は d>0 で右へ移動。
+                    // velocity.x は右移動で負になるので、-velocity.x を渡すと正になり右へ動く。正解。
+                    playerBody.translateX( -velocity.x * delta );
+
+                    // Z軸: velocity.z が負のとき前へ行く必要がある
+                    // translateZ(d) は d>0 で手前(後ろ)、d<0 で奥(前)へ移動。
+                    // velocity.z は前進で負になるので、そのまま渡せば奥へ動く。正解。
+                    playerBody.translateZ( velocity.z * delta );
+                } else {
+                    // PC用 (PointerLockControlsの関数を使用)
+                    controls.moveRight( -velocity.x * delta );
+                    controls.moveForward( -velocity.z * delta );
+                }
+                
+                body.position.y += (velocity.y * delta); 
+
+                const groundHeight = getNoiseHeight(body.position.x, body.position.z);
+                
+                if (body.position.y < groundHeight + standingEyeHeight) {
+                    if (!canJump) { 
+                        const fallSpeed = Math.abs(velocity.y);
+                        if (fallSpeed > landingAnimThreshold) {
+                            isLandingAnimActive = true;
+                            landingAnimStartTime = time;
+                            const forwardDir = new THREE.Vector3();
+                            camera.getWorldDirection(forwardDir);
+                            forwardDir.y = 0; forwardDir.normalize();
+                            velocity.add(forwardDir.multiplyScalar(300)); 
+                        } else {
+                            camOffset.y -= Math.min(fallSpeed / 10, 5.0); 
+                        }
+                    }
+                    velocity.y = 0;
+                    body.position.y = groundHeight + standingEyeHeight;
+                    canJump = true;
+                }
+
+                let landingAnimOffsetHeight = 0;
+                camera.rotation.x -= landingAnimRotationX;
+
+                if (isLandingAnimActive) {
+                    const elapsed = (time - landingAnimStartTime) / 1000;
+                    if (elapsed < landingAnimDuration) {
+                        const t = elapsed / landingAnimDuration;
+                        landingAnimOffsetHeight = -(Math.sin(t * Math.PI) * 8.5);
+                        landingAnimRotationX = -2 * Math.PI * easeOutCubic(t);
+                    } else {
+                        isLandingAnimActive = false;
+                        landingAnimRotationX = 0; 
+                    }
+                }
+
+                const currentSpeed = Math.sqrt(velocity.x**2 + velocity.z**2);
+                if (canJump && !isLandingAnimActive && currentSpeed > 5) {
+                    const frequency = isSprinting ? 16 : 11;
+                    walkCycle += delta * frequency;
+                    camOffset.y += (Math.sin(walkCycle) * (isSprinting ? 0.6 : 0.3) - camOffset.y) * delta * 15;
+                    camOffset.x += (Math.cos(walkCycle * 0.5) * (isSprinting ? 0.5 : 0.3) - camOffset.x) * delta * 15;
+                } else {
+                    camOffset.y += (Math.sin(time * 0.002) * 0.05 - camOffset.y) * delta * 5;
+                    camOffset.x += (0 - camOffset.x) * delta * 5;
+                }
+
+                if (!isLandingAnimActive) {
+                    let tiltTarget = 0;
+                    // Tilt logic with analog input support
+                    if (direction.x > 0.1) tiltTarget = -0.05; // 右移動で右に傾く
+                    if (direction.x < -0.1) tiltTarget = 0.05; // 左移動で左に傾く
+                    if (isSprinting) tiltTarget *= 2.0;
+                    targetTiltAngle += (tiltTarget - targetTiltAngle) * delta * 10;
+                } else targetTiltAngle = 0;
+
+                camera.position.y = standingEyeHeight + camOffset.y + landingAnimOffsetHeight;
+                camera.position.x = camOffset.x;
+                camera.rotation.z = targetTiltAngle; 
+                camera.rotation.x += landingAnimRotationX; 
+                
+                const targetFov = baseFov + (currentSpeed / 70) + (isLandingAnimActive ? 20 : 0);
+                camera.fov += (targetFov - camera.fov) * delta * 5.0;
+                camera.updateProjectionMatrix();
+
+                speedLines.style.opacity = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
