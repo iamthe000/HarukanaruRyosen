@@ -226,16 +226,27 @@
         #creator-actions {
             display: flex;
             justify-content: space-between;
+            gap: 10px;
         }
         #creator-actions button {
-            padding: 12px 20px;
+            flex-grow: 1;
+            padding: 12px 10px;
             border: none;
             border-radius: 5px;
-            font-size: 16px;
+            font-size: 14px;
             cursor: pointer;
+            text-align: center;
         }
         #save-char-button {
             background: #00aaff;
+            color: white;
+        }
+        #import-char-button {
+            background: #4caf50;
+            color: white;
+        }
+        #export-char-button {
+            background: #ff9800;
             color: white;
         }
         #close-creator-button {
@@ -346,8 +357,11 @@
 
                 <div id="creator-actions">
                     <button id="close-creator-button">閉じる</button>
+                    <button id="import-char-button">インポート</button>
+                    <button id="export-char-button">エクスポート</button>
                     <button id="save-char-button">保存</button>
                 </div>
+                <input type="file" id="import-file-input" style="display: none;" accept=".hrc" />
             </div>
         </div>
     </div>
@@ -795,14 +809,108 @@
             initCreator();
         }
 
+        function exportCharacter() {
+            const name = document.getElementById('char-name').value;
+            if (!name.trim()) {
+                alert('エクスポートするキャラクターの名前を入力してください。');
+                return;
+            }
+            if (creator.voxels.length === 0) {
+                alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+                return;
+            }
+
+            const voxelData = creator.voxels.map(v => ({
+                x: v.position.x,
+                y: v.position.y,
+                z: v.position.z,
+                color: v.material.color.getHex()
+            }));
+
+            const charData = {
+                name: name,
+                speed: parseFloat(document.getElementById('char-speed').value),
+                lifespan: parseInt(document.getElementById('char-lifespan').value),
+                reproduction: document.getElementById('repro-type').value,
+                reproCount: parseInt(document.getElementById('repro-count').value),
+                moveMethod: document.getElementById('move-method').value,
+                voxels: voxelData
+            };
+
+            const jsonString = JSON.stringify(charData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name}.hrc`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function importCharacter(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const charData = JSON.parse(e.target.result);
+
+                    // --- UIの値を更新 ---
+                    document.getElementById('char-name').value = charData.name || '';
+                    document.getElementById('char-speed').value = charData.speed || 1;
+                    document.getElementById('char-lifespan').value = charData.lifespan || 120;
+                    document.getElementById('repro-type').value = charData.reproduction || 'asexual';
+                    document.getElementById('repro-count').value = charData.reproCount || 1;
+                    document.getElementById('move-method').value = charData.moveMethod || 'random_walk';
+
+                    // --- Voxelモデルを再構築 ---
+                    // 既存のVoxelをクリア
+                    creator.voxels.forEach(v => creator.scene.remove(v));
+                    creator.voxels = [];
+
+                    if (charData.voxels && Array.isArray(charData.voxels)) {
+                        charData.voxels.forEach(vData => {
+                            const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+                            voxel.material.color.set(vData.color);
+                            voxel.position.set(vData.x, vData.y, vData.z);
+                            creator.scene.add(voxel);
+                            creator.voxels.push(voxel);
+                        });
+                    }
+                    
+                    alert(`キャラクター「${charData.name}」を読み込みました。`);
+
+                } catch (error) {
+                    alert('ファイルの読み込みに失敗しました。無効な形式のファイルです。');
+                    console.error("Error parsing character file:", error);
+                } finally {
+                    // 同じファイルを再度選択できるように、inputの値をリセット
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
         function initCreator() {
             const menuButton = document.getElementById('menu-button');
             const creatorModal = document.getElementById('creator-modal');
             const closeButton = document.getElementById('close-creator-button');
             const saveButton = document.getElementById('save-char-button');
+            const exportButton = document.getElementById('export-char-button');
+            const importButton = document.getElementById('import-char-button');
+            const importFileInput = document.getElementById('import-file-input');
             const canvas = document.getElementById('voxel-canvas');
 
             saveButton.addEventListener('click', characterManager.saveCharacter);
+            exportButton.addEventListener('click', exportCharacter);
+            importButton.addEventListener('click', () => importFileInput.click());
+            importFileInput.addEventListener('change', importCharacter);
 
             // --- Scene Setup ---
             creator.scene = new THREE.Scene();
