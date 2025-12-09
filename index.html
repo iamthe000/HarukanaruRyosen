@@ -138,11 +138,220 @@
         .joystick-area, #jump-button, #dash-button {
             z-index: 10; 
         }
+
+        /* --- Character Creator Styles --- */
+        #menu-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 100;
+            user-select: none;
+            font-size: 14px;
+        }
+        #creator-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 5, 20, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 101;
+            display: none;
+            color: white;
+            font-family: sans-serif;
+        }
+        #creator-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        #editor-panel {
+            flex-grow: 1;
+            position: relative;
+        }
+        #creator-ui {
+            width: 350px;
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+            overflow-y: auto;
+        }
+        #creator-ui h2 {
+            margin-top: 0;
+            text-align: center;
+            letter-spacing: 2px;
+            font-weight: lighter;
+        }
+        .ui-section {
+            margin-bottom: 20px;
+        }
+        .ui-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .ui-section input, .ui-section select {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: white;
+            font-size: 16px;
+        }
+        #color-palette {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+            gap: 10px;
+        }
+        .color-box {
+            width: 100%;
+            padding-bottom: 100%; /* Aspect ratio 1:1 */
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border 0.2s;
+        }
+        .color-box.selected {
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 10px #00ffff;
+        }
+        #creator-actions {
+            display: flex;
+            justify-content: space-between;
+        }
+        #creator-actions button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #save-char-button {
+            background: #00aaff;
+            color: white;
+        }
+        #close-creator-button {
+            background: #555;
+            color: white;
+        }
+        #voxel-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #edit-tools {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .edit-tool {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #555;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .edit-tool.selected {
+            background: #00aaff;
+            border-color: #00aaff;
+        }
+
+        @media (orientation: portrait) {
+            #creator-container {
+                flex-direction: column;
+            }
+            #creator-ui {
+                width: 100%;
+                height: 45%; /* Adjust as needed */
+                box-sizing: border-box;
+            }
+            #editor-panel {
+                height: 55%; /* Adjust as needed */
+            }
+        }
     </style>
 </head>
 <body>
     <div id="vignette"></div>
     <div id="speed-lines"></div>
+
+    <div id="menu-button">キャラクリエイト</div>
+
+    <div id="creator-modal">
+        <div id="creator-container">
+            <div id="editor-panel">
+                <canvas id="voxel-canvas"></canvas>
+            </div>
+            <div id="creator-ui">
+                <h2>キャラクタークリエイト</h2>
+                
+                <div class="ui-section">
+                    <label for="char-name">名前</label>
+                    <input type="text" id="char-name" placeholder="キャラクター名">
+                </div>
+
+                <div class="ui-section">
+                    <label>編集モード</label>
+                    <div id="edit-tools">
+                        <button id="add-voxel-tool" class="edit-tool selected">追加</button>
+                        <button id="remove-voxel-tool" class="edit-tool">削除</button>
+                    </div>
+                    <label>カラーパレット</label>
+                    <div id="color-palette"></div>
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-speed">移動速度</label>
+                    <input type="range" id="char-speed" min="0.5" max="3" value="1" step="0.1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-lifespan">寿命 (秒)</label>
+                    <input type="number" id="char-lifespan" min="10" max="1000" value="120">
+                </div>
+                
+                <div class="ui-section">
+                    <label for="repro-type">繁殖タイプ</label>
+                    <select id="repro-type">
+                        <option value="asexual">無性生殖</option>
+                        <option value="sexual">有性生殖</option>
+                        <option value="none">繁殖なし (初期リスのみ)</option>
+                    </select>
+                </div>
+
+                <div class="ui-section">
+                    <label for="repro-count">一回の繁殖で増える個体数</label>
+                    <input type="number" id="repro-count" min="1" max="10" value="1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="move-method">移動方法</label>
+                    <select id="move-method">
+                        <option value="random_walk">ランダムウォーク</option>
+                        <option value="still">静止</option>
+                    </select>
+                </div>
+
+                <div id="creator-actions">
+                    <button id="close-creator-button">閉じる</button>
+                    <button id="save-char-button">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="mobile-controls">
         <div id="camera-controls"></div> 
         <div class="joystick-area">
@@ -177,6 +386,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
         import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
         import { Sky } from 'three/addons/objects/Sky.js';
@@ -254,6 +464,208 @@
         const keyState = {}; 
 
         const SENSITIVITY_MULTIPLIER = 10; 
+
+        // --- Character Creator ---
+        let creator = {
+            isOpen: false,
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            voxels: [],
+            gridHelper: null,
+            selectedColor: 0x00ff00,
+            raycaster: new THREE.Raycaster(),
+            pointer: new THREE.Vector2(),
+            voxelMaterial: new THREE.MeshStandardMaterial({}),
+            voxelGeometry: new THREE.BoxGeometry(1, 1, 1),
+            editMode: 'add', // 'add' or 'remove'
+        };
+
+        const characterManager = {
+            characters: [],
+            activeInstances: [],
+            
+            spawnCharacter: (characterData) => {
+                const character = new THREE.Group();
+                
+                // Find the center of the character model
+                const center = new THREE.Vector3();
+                if (characterData.voxels.length > 0) {
+                    characterData.voxels.forEach(v => center.add(new THREE.Vector3(v.x, v.y, v.z)));
+                    center.divideScalar(characterData.voxels.length);
+                }
+
+                characterData.voxels.forEach(v => {
+                    const mat = new THREE.MeshStandardMaterial({ color: v.color, roughness: 0.8, flatShading: true });
+                    const mesh = new THREE.Mesh(creator.voxelGeometry, mat);
+                    mesh.position.set(v.x - center.x, v.y - center.y, v.z - center.z);
+                    character.add(mesh);
+                });
+
+                const spawnRadius = 80;
+                const spawnX = (Math.random() - 0.5) * spawnRadius;
+                const spawnZ = 50 + (Math.random() - 0.5) * spawnRadius;
+                const spawnY = getNoiseHeight(spawnX, spawnZ) + 5; // Add offset from ground
+                
+                character.position.set(spawnX, spawnY, spawnZ);
+                
+                const instance = {
+                    object3D: character,
+                    data: characterData,
+                    born: performance.now(),
+                    lastAction: 0,
+                    velocity: new THREE.Vector3()
+                };
+
+                characterManager.activeInstances.push(instance);
+                scene.add(character);
+            },
+
+            update: (delta, time) => {
+                const MAX_INSTANCES = 50; // Performance limit
+                const now = performance.now();
+
+                // 1. Update existing instances (movement, lifespan, reproduction)
+                for (let i = characterManager.activeInstances.length - 1; i >= 0; i--) {
+                    const instance = characterManager.activeInstances[i];
+                    const age = (now - instance.born) / 1000;
+
+                    // --- Lifespan Check ---
+                    if (age > instance.data.lifespan) {
+                        scene.remove(instance.object3D);
+                        // Basic cleanup
+                        instance.object3D.traverse(child => {
+                            if (child.isMesh) {
+                                child.geometry.dispose();
+                                child.material.dispose();
+                            }
+                        });
+                        characterManager.activeInstances.splice(i, 1);
+                        continue;
+                    }
+
+                    // --- Movement ---
+                    instance.velocity.y -= 9.8 * 2.0 * delta; // Apply gravity regardless of movement type
+                    if (instance.data.moveMethod === 'random_walk') {
+                        instance.object3D.position.add(instance.velocity.clone().multiplyScalar(delta));
+                    } else { // 'still' or other types only move vertically due to gravity
+                        instance.object3D.position.y += instance.velocity.y * delta;
+                    }
+
+                    const groundHeight = getNoiseHeight(instance.object3D.position.x, instance.object3D.position.z);
+                    if (instance.object3D.position.y < groundHeight) {
+                        instance.object3D.position.y = groundHeight;
+                        instance.velocity.y = 0;
+                        if (instance.data.moveMethod === 'random_walk') {
+                            instance.velocity.x *= 0.9; // Friction
+                            instance.velocity.z *= 0.9;
+                        }
+                    }
+
+                    // --- Behavior (Reproduction & Movement decisions) ---
+                    if (now - instance.lastAction > 3000 + Math.random() * 4000) { // Every 3-7 seconds
+                        instance.lastAction = now;
+
+                        // --- Reproduction Logic ---
+                        if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                            if (instance.data.reproduction === 'asexual') {
+                                for (let j = 0; j < instance.data.reproCount; j++) {
+                                    if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                        characterManager.spawnCharacter(instance.data);
+                                    }
+                                }
+                            } else if (instance.data.reproduction === 'sexual') {
+                                // Find a potential partner of the same species
+                                const partners = characterManager.activeInstances.filter(p =>
+                                    p !== instance && p.data.name === instance.data.name
+                                );
+                                if (partners.length > 0) {
+                                    const partner = partners[Math.floor(Math.random() * partners.length)];
+                                    // Check if they are close enough to reproduce
+                                    if (instance.object3D.position.distanceTo(partner.object3D.position) < 20) {
+                                         for (let j = 0; j < instance.data.reproCount; j++) {
+                                            if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                                characterManager.spawnCharacter(instance.data);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- Movement Direction Change ---
+                        if (instance.data.moveMethod === 'random_walk') {
+                            const angle = Math.random() * Math.PI * 2;
+                            const speed = instance.data.speed * 10;
+                            instance.velocity.x = Math.cos(angle) * speed;
+                            instance.velocity.z = Math.sin(angle) * speed;
+                            if (Math.random() > 0.5) instance.velocity.y = Math.random() * 5; // Little hop
+                        }
+                    }
+                }
+
+                // 2. Spawn new "infinite" characters from source
+                characterManager.characters.forEach(charData => {
+                    if (charData.reproduction === 'none' && characterManager.activeInstances.length < MAX_INSTANCES) {
+                        if (!charData.lastSpawn || (now - charData.lastSpawn > 10000)) { // Spawn every 10 seconds
+                            charData.lastSpawn = now;
+                            characterManager.spawnCharacter(charData);
+                        }
+                    }
+                });
+            },
+
+            saveCharacter: () => {
+                const name = document.getElementById('char-name').value;
+                if (!name.trim()) {
+                    alert('キャラクター名を入力してください。');
+                    return;
+                }
+                if (creator.voxels.length === 0) {
+                    alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+                    return;
+                }
+
+                const voxelData = creator.voxels.map(v => ({
+                    x: v.position.x,
+                    y: v.position.y,
+                    z: v.position.z,
+                    color: v.material.color.getHex()
+                }));
+
+                const newChar = {
+                    name: name,
+                    speed: parseFloat(document.getElementById('char-speed').value),
+                    lifespan: parseInt(document.getElementById('char-lifespan').value),
+                    reproduction: document.getElementById('repro-type').value,
+                    reproCount: parseInt(document.getElementById('repro-count').value),
+                    moveMethod: document.getElementById('move-method').value,
+                    voxels: voxelData
+                };
+                
+                characterManager.characters.push(newChar);
+                localStorage.setItem('voxelGameCharacters', JSON.stringify(characterManager.characters));
+                
+                characterManager.spawnCharacter(newChar);
+
+                alert(`キャラクター「${name}」が保存されました！`);
+                
+                // Reset creator
+                document.getElementById('char-name').value = '';
+                creator.voxels.forEach(v => creator.scene.remove(v));
+                creator.voxels = [];
+                document.getElementById('close-creator-button').click();
+            },
+
+            loadCharacters: () => {
+                const data = localStorage.getItem('voxelGameCharacters');
+                if (data) {
+                    characterManager.characters = JSON.parse(data);
+                    console.log(`${characterManager.characters.length} characters loaded.`);
+                }
+            }
+        };
 
         init();
         animate();
@@ -378,8 +790,181 @@
             
             document.body.appendChild(renderer.domElement);
             window.addEventListener('resize', onWindowResize);
+
+            characterManager.loadCharacters();
+            initCreator();
         }
 
+        function initCreator() {
+            const menuButton = document.getElementById('menu-button');
+            const creatorModal = document.getElementById('creator-modal');
+            const closeButton = document.getElementById('close-creator-button');
+            const saveButton = document.getElementById('save-char-button');
+            const canvas = document.getElementById('voxel-canvas');
+
+            saveButton.addEventListener('click', characterManager.saveCharacter);
+
+            // --- Scene Setup ---
+            creator.scene = new THREE.Scene();
+            creator.scene.background = new THREE.Color(0x222233);
+            
+            const aLight = new THREE.AmbientLight(0xffffff, 0.6);
+            creator.scene.add(aLight);
+            const dLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dLight.position.set(10, 15, 5);
+            creator.scene.add(dLight);
+            
+            creator.camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            creator.camera.position.set(10, 10, 10);
+            
+            creator.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            creator.controls = new OrbitControls(creator.camera, creator.renderer.domElement);
+
+            // --- Grid & Floor ---
+            creator.gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x444444);
+            creator.scene.add(creator.gridHelper);
+            const floorGeo = new THREE.PlaneGeometry(20, 20);
+            floorGeo.rotateX(-Math.PI / 2);
+            const floorMat = new THREE.MeshBasicMaterial({ visible: false });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.name = 'floor';
+            creator.scene.add(floor);
+
+
+            menuButton.addEventListener('click', () => {
+                creator.isOpen = true;
+                creatorModal.style.display = 'block';
+                if (!isMobile) controls.unlock();
+                const panel = document.getElementById('editor-panel');
+                creator.camera.aspect = panel.clientWidth / panel.clientHeight;
+                creator.camera.updateProjectionMatrix();
+                creator.renderer.setSize(panel.clientWidth, panel.clientHeight);
+            });
+
+            closeButton.addEventListener('click', () => {
+                creator.isOpen = false;
+                creatorModal.style.display = 'none';
+            });
+            
+            // --- Edit Tools ---
+            const addTool = document.getElementById('add-voxel-tool');
+            const removeTool = document.getElementById('remove-voxel-tool');
+            
+            function setEditMode(mode) {
+                creator.editMode = mode;
+                addTool.classList.toggle('selected', mode === 'add');
+                removeTool.classList.toggle('selected', mode === 'remove');
+            }
+            
+            addTool.addEventListener('click', () => setEditMode('add'));
+            removeTool.addEventListener('click', () => setEditMode('remove'));
+
+            // --- Color Palette ---
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffffff, 0x000000, 0xffa500, 0x800080, 0x32cd32, 0x8b4513, 'transparent'];
+            const palette = document.getElementById('color-palette');
+            colors.forEach(color => {
+                const colorBox = document.createElement('div');
+                colorBox.className = 'color-box';
+                if (color === 'transparent') {
+                    colorBox.style.background = 'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 10px 10px';
+                    colorBox.dataset.color = 'transparent';
+                } else {
+                    colorBox.style.backgroundColor = `#${color.toString(16).padStart(6, '0')}`;
+                    colorBox.dataset.color = color;
+                }
+                
+                if (color === creator.selectedColor) {
+                    colorBox.classList.add('selected');
+                }
+                colorBox.addEventListener('click', () => {
+                    creator.selectedColor = color;
+                    document.querySelectorAll('.color-box').forEach(box => box.classList.remove('selected'));
+                    colorBox.classList.add('selected');
+                    // Switch to add mode automatically when a color is selected
+                    if (color !== 'transparent') {
+                        setEditMode('add');
+                    }
+                });
+                palette.appendChild(colorBox);
+            });
+            
+            // --- Voxel Logic ---
+            const hoverCube = new THREE.Mesh(
+                new THREE.BoxGeometry(1.02, 1.02, 1.02),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+            );
+            creator.scene.add(hoverCube);
+
+            function getPointerPosition(event) {
+                const rect = canvas.getBoundingClientRect();
+                creator.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                creator.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            }
+
+            canvas.addEventListener('pointermove', (event) => {
+                getPointerPosition(event);
+                creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+                const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+
+                if (intersects.length > 0) {
+                    const intersect = intersects[0];
+                    const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal);
+                    pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+                    hoverCube.position.copy(pos);
+                    hoverCube.visible = true;
+                } else {
+                    hoverCube.visible = false;
+                }
+            });
+
+            canvas.addEventListener('pointerdown', (event) => {
+                getPointerPosition(event);
+                creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+                const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+                if (intersects.length === 0) return;
+
+                const intersect = intersects[0];
+
+                // For PC, allow right-click to always remove
+                if (event.button === 2) {
+                    if (intersect.object !== floor) {
+                        creator.scene.remove(intersect.object);
+                        creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+                    }
+                    return;
+                }
+
+                // For left-click and touch, use the selected tool
+                if (creator.editMode === 'remove') {
+                    if (intersect.object !== floor) {
+                        creator.scene.remove(intersect.object);
+                        creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+                    }
+                } else { // 'add' mode
+                    if (creator.selectedColor === 'transparent') {
+                        // If transparent is selected in add mode, behave like remove tool
+                         if (intersect.object !== floor) {
+                            creator.scene.remove(intersect.object);
+                            creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+                        }
+                        return;
+                    }
+                    const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal.clone().multiplyScalar(0.5));
+                    pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+
+                    if (creator.voxels.some(v => v.position.equals(pos))) return;
+
+                    const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+                    voxel.material.color.set(creator.selectedColor);
+                    voxel.position.copy(pos);
+                    creator.scene.add(voxel);
+                    creator.voxels.push(voxel);
+                }
+            });
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        }
+        
         function setupMobileControls() {
             const joystickThumb = document.getElementById('joystick-thumb');
             const joystickArea = joystickThumb.parentElement;
@@ -783,7 +1368,13 @@
 
             const gameActive = controls.isLocked || (isMobile && blocker.style.display === 'none');
 
+            if (creator.isOpen) {
+                creator.controls.update();
+                creator.renderer.render(creator.scene, creator.camera);
+            }
+
             if (gameActive) {
+                characterManager.update(delta, time);
                 updateChunks();
                 const body = playerBody;
                 const dampingX = canJump ? 8.0 : 1.0; 
