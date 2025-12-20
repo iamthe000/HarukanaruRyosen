@@ -226,16 +226,27 @@
         #creator-actions {
             display: flex;
             justify-content: space-between;
+            gap: 10px;
         }
         #creator-actions button {
-            padding: 12px 20px;
+            flex-grow: 1;
+            padding: 12px 10px;
             border: none;
             border-radius: 5px;
-            font-size: 16px;
+            font-size: 14px;
             cursor: pointer;
+            text-align: center;
         }
         #save-char-button {
             background: #00aaff;
+            color: white;
+        }
+        #import-char-button {
+            background: #4caf50;
+            color: white;
+        }
+        #export-char-button {
+            background: #ff9800;
             color: white;
         }
         #close-creator-button {
@@ -280,6 +291,65 @@
             #editor-panel {
                 height: 55%; /* Adjust as needed */
             }
+        }
+
+        /* --- Hotbar Styles --- */
+        #hotbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 95;
+            pointer-events: none; /* ホットバーがクリックイベントを妨害しないように */
+        }
+        .hotbar-slot {
+            width: 50px;
+            height: 50px;
+            background: rgba(0,0,0,0.4);
+            border: 2px solid #888;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            font-family: monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            padding: 5px;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .hotbar-slot.selected {
+            border-color: #fff;
+            background: rgba(20, 120, 255, 0.5);
+            box-shadow: 0 0 10px #00ffff;
+        }
+
+        /* --- Jetpack Fuel Bar Styles --- */
+        #fuel-bar-container {
+            position: absolute;
+            bottom: 80px; /* Above hotbar */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 230px; /* Matches hotbar width (50*4 + 10*3) */
+            height: 15px;
+            background: rgba(0,0,0,0.4);
+            border: 2px solid #888;
+            border-radius: 5px;
+            display: none; /* Hidden by default */
+            z-index: 95;
+            padding: 2px;
+        }
+        #fuel-bar {
+            width: 100%;
+            height: 100%;
+            background: #00ffff;
+            border-radius: 2px;
+            transition: width 0.2s ease-out;
         }
     </style>
 </head>
@@ -346,8 +416,11 @@
 
                 <div id="creator-actions">
                     <button id="close-creator-button">閉じる</button>
+                    <button id="import-char-button">インポート</button>
+                    <button id="export-char-button">エクスポート</button>
                     <button id="save-char-button">保存</button>
                 </div>
+                <input type="file" id="import-file-input" style="display: none;" accept=".hrc" />
             </div>
         </div>
     </div>
@@ -359,6 +432,15 @@
         </div>
         <div id="dash-button">DASH</div>
         <div id="jump-button">JUMP</div>
+    </div>
+    <div id="hotbar">
+        <div class="hotbar-slot" id="slot-1"></div>
+        <div class="hotbar-slot" id="slot-2"></div>
+        <div class="hotbar-slot" id="slot-3"></div>
+        <div class="hotbar-slot" id="slot-4"></div>
+    </div>
+    <div id="fuel-bar-container">
+        <div id="fuel-bar"></div>
     </div>
     <div id="blocker">
         <div id="instructions">
@@ -396,6 +478,37 @@
         let playerBody; 
         let blocker;
         let sky, sun;
+
+        // --- インベントリ & アイテム ---
+        const inventory = {
+            items: [null, null, null, null],
+            selectedSlot: 0, // 0-3
+        };
+
+        const itemManager = {
+            'axe': { name: 'Axe' },
+            'ak47': { name: 'AK-47' },
+            'jetpack': { name: 'Jetpack' },
+            'c4': { name: 'C4' },
+        };
+        const itemModels = {};
+        let viewmodel; // Group for held items
+        let axeSwingState = { active: false, startTime: 0, duration: 300 };
+        let ak47FireState = { active: false, startTime: 0, duration: 100 };
+        const jetpackState = {
+            fuel: 100,
+            maxFuel: 100,
+            consumptionRate: 30, // units per second
+            rechargeRate: 15, // units per second
+            active: false
+        };
+        const c4State = {
+            placedInstance: null,
+            detonationTime: 0,
+            detonationDuration: 500,
+            particles: [],
+            isDetonating: false,
+        };
         
         const velocity = new THREE.Vector3();
         const direction = new THREE.Vector3();
@@ -483,6 +596,49 @@
         };
 
         const characterManager = {
+            defaultCharacters: [
+                {
+                    name: '鹿',
+                    speed: 1.5,
+                    lifespan: 180,
+                    reproduction: 'none',
+                    reproCount: 1,
+                    moveMethod: 'random_walk',
+                    voxels: [
+                        // Body
+                        {x: -1, y: 1, z: 0, color: 0x8B4513}, {x: 0, y: 1, z: 0, color: 0x8B4513},
+                        {x: 1, y: 1, z: 0, color: 0x8B4513}, {x: 2, y: 1, z: 0, color: 0x8B4513},
+                        {x: -1, y: 2, z: 0, color: 0x9F6B3B}, {x: 0, y: 2, z: 0, color: 0x9F6B3B},
+                        {x: 1, y: 2, z: 0, color: 0x9F6B3B}, {x: 2, y: 2, z: 0, color: 0x9F6B3B},
+                        // Legs
+                        {x: -1, y: 0, z: 0, color: 0x5C3317}, {x: 2, y: 0, z: 0, color: 0x5C3317},
+                        {x: -1, y: 0, z: 1, color: 0x5C3317}, {x: 2, y: 0, z: 1, color: 0x5C3317},
+                        // Head
+                        {x: -2, y: 2, z: 0, color: 0x9F6B3B},
+                        // Antlers
+                        {x: -3, y: 3, z: 0, color: 0xF5DEB3}, {x: -3, y: 4, z: 0, color: 0xF5DEB3},
+                        {x: -3, y: 3, z: 1, color: 0xF5DEB3},
+                    ]
+                },
+                {
+                    name: '鳥',
+                    speed: 2.5,
+                    lifespan: 60,
+                    reproduction: 'none',
+                    reproCount: 1,
+                    moveMethod: 'random_walk', // Will hop frequently
+                    voxels: [
+                        // Body
+                        {x: 0, y: 0, z: 0, color: 0x4682B4}, {x: 1, y: 0, z: 0, color: 0x4682B4},
+                        // Wing L
+                        {x: 0, y: 0, z: -1, color: 0x6092c4}, {x: -1, y: 0, z: -1, color: 0x6092c4},
+                        // Wing R
+                        {x: 1, y: 0, z: 1, color: 0x6092c4}, {x: 2, y: 0, z: 1, color: 0x6092c4},
+                        // Beak
+                        {x: -1, y: 0, z: 0, color: 0xFFA500},
+                    ]
+                }
+            ],
             characters: [],
             activeInstances: [],
             
@@ -659,11 +815,21 @@
             },
 
             loadCharacters: () => {
+                // Start with default characters
+                characterManager.characters = [...characterManager.defaultCharacters];
+
                 const data = localStorage.getItem('voxelGameCharacters');
                 if (data) {
-                    characterManager.characters = JSON.parse(data);
-                    console.log(`${characterManager.characters.length} characters loaded.`);
+                    const userCharacters = JSON.parse(data);
+                    // Add user-created characters, preventing duplicates if names match defaults
+                    userCharacters.forEach(userChar => {
+                        if (!characterManager.characters.some(defaultChar => defaultChar.name === userChar.name)) {
+                            characterManager.characters.push(userChar);
+                        }
+                    });
+                    console.log(`${userCharacters.length} user characters loaded.`);
                 }
+                console.log(`Total characters available: ${characterManager.characters.length}`);
             }
         };
 
@@ -765,6 +931,15 @@
             const onKeyDown = (e) => {
                 if (isMobile) return;
                 keyState[e.code] = true;
+
+                // --- アイテム選択 ---
+                if (e.code.startsWith('Digit')) {
+                    const slotIndex = parseInt(e.code.slice(5)) - 1;
+                    if (slotIndex >= 0 && slotIndex < inventory.items.length) {
+                        inventory.selectedSlot = slotIndex;
+                        updateHotbarUI();
+                    }
+                }
             };
 
             const onKeyUp = (e) => {
@@ -793,6 +968,282 @@
 
             characterManager.loadCharacters();
             initCreator();
+
+            // --- 初期インベントリ設定 ---
+            inventory.items[0] = 'axe';
+            inventory.items[1] = 'ak47';
+            inventory.items[2] = 'jetpack';
+            inventory.items[3] = 'c4';
+            updateHotbarUI();
+
+            // --- Viewmodel Setup ---
+            viewmodel = new THREE.Group();
+            camera.add(viewmodel);
+            viewmodel.position.set(0.6, -0.4, -1);
+
+            // --- Create Item Models ---
+            const handleMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8, flatShading: true });
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x808080, metalness: 0.8, roughness: 0.4, flatShading: true });
+            
+            const handleGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.8, 8);
+            handleGeo.translate(0, -0.4, 0);
+            const headGeo = new THREE.BoxGeometry(0.1, 0.4, 0.3);
+            headGeo.translate(0, 0, 0.1);
+            
+            const axeModel = new THREE.Group();
+            axeModel.add(new THREE.Mesh(handleGeo, handleMat));
+            axeModel.add(new THREE.Mesh(headGeo, headMat));
+            axeModel.rotation.z = Math.PI / 4;
+            itemModels.axe = axeModel;
+
+            // --- AK-47 Model ---
+            const ak47Model = new THREE.Group();
+            const stockGeo = new THREE.BoxGeometry(0.6, 0.1, 0.1);
+            stockGeo.translate(-0.2, 0, 0);
+            const bodyGeo = new THREE.BoxGeometry(0.4, 0.15, 0.12);
+            bodyGeo.translate(0.3, 0.05, 0);
+            const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8);
+            barrelGeo.rotateZ(Math.PI/2);
+            barrelGeo.translate(0.75, 0.08, 0);
+            const magGeo = new THREE.BoxGeometry(0.1, 0.3, 0.1);
+            magGeo.translate(0.3, -0.1, 0);
+            magGeo.rotateZ(-0.2);
+
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, flatShading: true });
+            const metalMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.5, flatShading: true });
+            
+            ak47Model.add(new THREE.Mesh(stockGeo, woodMat));
+            ak47Model.add(new THREE.Mesh(bodyGeo, metalMat));
+            ak47Model.add(new THREE.Mesh(barrelGeo, metalMat));
+            ak47Model.add(new THREE.Mesh(magGeo, metalMat));
+            ak47Model.scale.set(0.8, 0.8, 0.8);
+            
+            // Muzzle flash
+            const flashMat = new THREE.SpriteMaterial({ color: 0xffff00, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.8 });
+            const muzzleFlash = new THREE.Sprite(flashMat);
+            muzzleFlash.position.set(1, 0.08, 0); // Barrel end
+            muzzleFlash.scale.set(0.5, 0.5, 0.5);
+            muzzleFlash.visible = false;
+            ak47Model.add(muzzleFlash);
+            itemModels.ak47_flash = muzzleFlash; // Store reference
+
+            itemModels.ak47 = ak47Model;
+            
+            // --- Jetpack Model ---
+            const jetpackModel = new THREE.Group();
+            const tankGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.5, 12);
+            const nozzleGeo = new THREE.ConeGeometry(0.08, 0.15, 8);
+
+            const tank1 = new THREE.Mesh(tankGeo, metalMat);
+            tank1.position.x = -0.15;
+            const tank2 = new THREE.Mesh(tankGeo, metalMat);
+            tank2.position.x = 0.15;
+
+            const nozzle1 = new THREE.Mesh(nozzleGeo, headMat); // Using axe head material for contrast
+            nozzle1.position.set(-0.15, -0.3, 0);
+            nozzle1.rotation.x = Math.PI;
+            const nozzle2 = new THREE.Mesh(nozzleGeo, headMat);
+            nozzle2.position.set(0.15, -0.3, 0);
+            nozzle2.rotation.x = Math.PI;
+            
+            jetpackModel.add(tank1);
+            jetpackModel.add(tank2);
+            jetpackModel.add(nozzle1);
+            jetpackModel.add(nozzle2);
+            jetpackModel.scale.set(0.7, 0.7, 0.7);
+            jetpackModel.position.set(0, 0.2, 0.2); // Adjust position to not clip with camera
+            jetpackModel.rotation.x = 0.2;
+            itemModels.jetpack = jetpackModel;
+
+            // Initially hide all models
+            Object.values(itemModels).forEach(model => { if(model.isObject3D) model.visible = false; });
+            viewmodel.add(itemModels.axe);
+            viewmodel.add(itemModels.ak47);
+            viewmodel.add(itemModels.jetpack);
+            
+            // --- C4 Model ---
+            const c4Model = new THREE.Group();
+            const c4Block = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.3), new THREE.MeshStandardMaterial({ color: 0x222228, flatShading: true }));
+            const c4Light = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 8), new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1 }));
+            c4Light.position.y = 0.06;
+            c4Model.add(c4Block);
+            c4Model.add(c4Light);
+            itemModels.c4_light = c4Light;
+            itemModels.c4 = c4Model;
+            viewmodel.add(c4Model);
+
+            // Initially hide all models - run again to include C4
+            Object.values(itemModels).forEach(model => { if(model.isObject3D) model.visible = false; });
+        }
+
+        function updateHeldItem() {
+            const selectedItemKey = inventory.items[inventory.selectedSlot];
+            for (const key in itemModels) {
+                if (itemModels[key] && itemModels[key].isObject3D) {
+                    itemModels[key].visible = (key === selectedItemKey);
+                }
+            }
+            // Show/hide fuel bar
+            document.getElementById('fuel-bar-container').style.display = (selectedItemKey === 'jetpack') ? 'block' : 'none';
+        }
+
+        function updateHotbarUI() {
+            for (let i = 0; i < inventory.items.length; i++) {
+                const slot = document.getElementById(`slot-${i + 1}`);
+                if (!slot) continue;
+                const itemKey = inventory.items[i];
+                if (itemKey && itemManager[itemKey]) {
+                    slot.textContent = itemManager[itemKey].name;
+                } else {
+                    slot.textContent = '';
+                }
+
+                if (i === inventory.selectedSlot) {
+                    slot.classList.add('selected');
+                } else {
+                    slot.classList.remove('selected');
+                }
+            }
+            updateHeldItem();
+        }
+
+        window.addEventListener('mousedown', (event) => {
+            if (event.button === 0 && (controls.isLocked || isMobile)) { // Left click
+                const selectedItemKey = inventory.items[inventory.selectedSlot];
+                if (selectedItemKey === 'axe' && !axeSwingState.active) {
+                    axeSwingState.active = true;
+                    axeSwingState.startTime = performance.now();
+                } else if (selectedItemKey === 'ak47') {
+                    ak47FireState.active = true;
+                    ak47FireState.startTime = performance.now();
+                    itemModels.ak47_flash.visible = true;
+                    // Play sound
+                } else if (selectedItemKey === 'c4') {
+                    if (!c4State.placedInstance) {
+                        // Place C4
+                        const raycaster = new THREE.Raycaster();
+                        raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+                        const intersects = raycaster.intersectObjects(scene.children, true);
+                        const groundIntersect = intersects.find(i => !i.object.isSprite && i.object.geometry.type !== 'BufferGeometry');
+                        
+                        if (groundIntersect && groundIntersect.point.distanceTo(playerBody.position) < 15) {
+                            c4State.placedInstance = itemModels.c4.clone();
+                            c4State.placedInstance.position.copy(groundIntersect.point);
+                            c4State.placedInstance.lookAt(playerBody.position);
+                            scene.add(c4State.placedInstance);
+                            itemModels.c4.visible = false; // Hide from viewmodel
+                        }
+                    } else if (!c4State.isDetonating) {
+                        // Detonate C4
+                        c4State.isDetonating = true;
+                        c4State.detonationTime = performance.now();
+                        c4State.placedInstance.children[1].material.emissiveIntensity = 0; // Turn off light
+                        
+                        // Create particles
+                        const particleCount = 50;
+                        const particleMat = new THREE.MeshBasicMaterial({ color: 0xffa500 });
+                        for (let i = 0; i < particleCount; i++) {
+                            const particle = new THREE.Mesh(new THREE.SphereGeometry(0.1, 4, 4), particleMat);
+                            particle.position.copy(c4State.placedInstance.position);
+                            particle.velocity = new THREE.Vector3(
+                                (Math.random() - 0.5) * 20,
+                                Math.random() * 20,
+                                (Math.random() - 0.5) * 20
+                            );
+                            c4State.particles.push(particle);
+                            scene.add(particle);
+                        }
+                    }
+                }
+            }
+        });
+
+        function exportCharacter() {
+            const name = document.getElementById('char-name').value;
+            if (!name.trim()) {
+                alert('エクスポートするキャラクターの名前を入力してください。');
+                return;
+            }
+            if (creator.voxels.length === 0) {
+                alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+                return;
+            }
+
+            const voxelData = creator.voxels.map(v => ({
+                x: v.position.x,
+                y: v.position.y,
+                z: v.position.z,
+                color: v.material.color.getHex()
+            }));
+
+            const charData = {
+                name: name,
+                speed: parseFloat(document.getElementById('char-speed').value),
+                lifespan: parseInt(document.getElementById('char-lifespan').value),
+                reproduction: document.getElementById('repro-type').value,
+                reproCount: parseInt(document.getElementById('repro-count').value),
+                moveMethod: document.getElementById('move-method').value,
+                voxels: voxelData
+            };
+
+            const jsonString = JSON.stringify(charData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name}.hrc`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function importCharacter(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const charData = JSON.parse(e.target.result);
+
+                    // --- UIの値を更新 ---
+                    document.getElementById('char-name').value = charData.name || '';
+                    document.getElementById('char-speed').value = charData.speed || 1;
+                    document.getElementById('char-lifespan').value = charData.lifespan || 120;
+                    document.getElementById('repro-type').value = charData.reproduction || 'asexual';
+                    document.getElementById('repro-count').value = charData.reproCount || 1;
+                    document.getElementById('move-method').value = charData.moveMethod || 'random_walk';
+
+                    // --- Voxelモデルを再構築 ---
+                    // 既存のVoxelをクリア
+                    creator.voxels.forEach(v => creator.scene.remove(v));
+                    creator.voxels = [];
+
+                    if (charData.voxels && Array.isArray(charData.voxels)) {
+                        charData.voxels.forEach(vData => {
+                            const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+                            voxel.material.color.set(vData.color);
+                            voxel.position.set(vData.x, vData.y, vData.z);
+                            creator.scene.add(voxel);
+                            creator.voxels.push(voxel);
+                        });
+                    }
+                    
+                    alert(`キャラクター「${charData.name}」を読み込みました。`);
+
+                } catch (error) {
+                    alert('ファイルの読み込みに失敗しました。無効な形式のファイルです。');
+                    console.error("Error parsing character file:", error);
+                } finally {
+                    // 同じファイルを再度選択できるように、inputの値をリセット
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
         }
 
         function initCreator() {
@@ -800,9 +1251,15 @@
             const creatorModal = document.getElementById('creator-modal');
             const closeButton = document.getElementById('close-creator-button');
             const saveButton = document.getElementById('save-char-button');
+            const exportButton = document.getElementById('export-char-button');
+            const importButton = document.getElementById('import-char-button');
+            const importFileInput = document.getElementById('import-file-input');
             const canvas = document.getElementById('voxel-canvas');
 
             saveButton.addEventListener('click', characterManager.saveCharacter);
+            exportButton.addEventListener('click', exportCharacter);
+            importButton.addEventListener('click', () => importFileInput.click());
+            importFileInput.addEventListener('change', importCharacter);
 
             // --- Scene Setup ---
             creator.scene = new THREE.Scene();
@@ -1345,7 +1802,8 @@
             moveLeft = keyState['KeyA'] || false;
             moveRight = keyState['KeyD'] || false;
             isSprinting = keyState['ShiftLeft'] || false;
-            if (keyState['Space'] && canJump && !isLandingAnimActive) {
+            // Jump logic is now mutually exclusive with jetpack
+            if (keyState['Space'] && canJump && !isLandingAnimActive && inventory.items[inventory.selectedSlot] !== 'jetpack') {
                 velocity.y += 160;
                 canJump = false;
             }
@@ -1382,6 +1840,25 @@
                 velocity.x -= velocity.x * dampingX * delta;
                 velocity.z -= velocity.z * dampingZ * delta;
                 velocity.y -= 9.8 * 60.0 * delta; 
+
+                // --- Jetpack Logic ---
+                const selectedItem = inventory.items[inventory.selectedSlot];
+                jetpackState.active = (selectedItem === 'jetpack' && (keyState['Space'] || (gamepadConnected && navigator.getGamepads()[0]?.buttons[0].pressed)) && jetpackState.fuel > 0);
+
+                if (jetpackState.active) {
+                    velocity.y += 160 * delta; // Upward thrust, similar to jump power
+                    jetpackState.fuel -= jetpackState.consumptionRate * delta;
+                    canJump = false; // Prevent jumping/landing anim while flying
+                } else {
+                    // Recharge fuel only when not active
+                    if (jetpackState.fuel < jetpackState.maxFuel) {
+                         jetpackState.fuel += jetpackState.rechargeRate * delta;
+                    }
+                }
+                jetpackState.fuel = Math.max(0, Math.min(jetpackState.maxFuel, jetpackState.fuel));
+
+                // Update UI
+                document.getElementById('fuel-bar').style.width = `${(jetpackState.fuel / jetpackState.maxFuel) * 100}%`;
 
                 // --- 移動方向の決定 ---
                 if (isMobile && activeTouch.joystick !== null) {
@@ -1512,6 +1989,65 @@
                 camera.updateProjectionMatrix();
 
                 speedLines.style.opacity = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
+
+                // --- Axe Swing Animation ---
+                if (axeSwingState.active) {
+                    const elapsed = time - axeSwingState.startTime;
+                    if (elapsed < axeSwingState.duration) {
+                        const t = elapsed / axeSwingState.duration;
+                        const swingAngle = Math.sin(t * Math.PI) * 1.5; // Simple swing motion
+                        viewmodel.rotation.x = -swingAngle;
+                        viewmodel.rotation.z = swingAngle * 0.5;
+                        viewmodel.position.z = -1 + Math.sin(t * Math.PI) * 0.5;
+                    } else {
+                        axeSwingState.active = false;
+                        viewmodel.rotation.set(0, 0, 0);
+                        viewmodel.position.z = -1;
+                    }
+                }
+
+                // --- AK-47 Fire Animation ---
+                if (ak47FireState.active) {
+                    const elapsed = time - ak47FireState.startTime;
+                    if (elapsed < ak47FireState.duration) {
+                        const t = elapsed / ak47FireState.duration;
+                        viewmodel.position.z = -1 - Math.sin(t * Math.PI) * 0.1; // Recoil
+                        viewmodel.rotation.x = Math.sin(t * Math.PI) * 0.05;
+                    } else {
+                        ak47FireState.active = false;
+                        itemModels.ak47_flash.visible = false;
+                        // Reset position in case of leftover state
+                        if(inventory.items[inventory.selectedSlot] === 'ak47'){
+                           viewmodel.rotation.set(0,0,0);
+                           viewmodel.position.z = -1;
+                        }
+                    }
+                }
+
+                // --- C4 Logic ---
+                if(c4State.placedInstance && !c4State.isDetonating) {
+                    // Blinking light
+                    const light = c4State.placedInstance.children[1];
+                    light.material.emissiveIntensity = (Math.sin(time * 0.01) + 1) * 0.5;
+                }
+                if (c4State.isDetonating) {
+                    const elapsed = time - c4State.detonationTime;
+                    if (elapsed < c4State.detonationDuration) {
+                        for (let i = c4State.particles.length - 1; i >= 0; i--) {
+                            const p = c4State.particles[i];
+                            p.velocity.y -= 9.8 * delta;
+                            p.position.add(p.velocity.clone().multiplyScalar(delta));
+                        }
+                    } else {
+                        // Cleanup
+                        c4State.particles.forEach(p => scene.remove(p));
+                        scene.remove(c4State.placedInstance);
+                        c4State.particles = [];
+                        c4State.placedInstance = null;
+                        c4State.isDetonating = false;
+                        updateHeldItem(); // Show C4 in hand again
+                    }
+                }
             }
             renderer.render(scene, camera);
         }
