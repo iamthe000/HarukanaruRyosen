@@ -279,6 +279,39 @@
             border-color: #00aaff;
         }
 
+        /* --- Hotbar Styles --- */
+        #hotbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        .hotbar-slot {
+            width: 60px;
+            height: 60px;
+            border: 2px solid #888;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 12px;
+            user-select: none;
+            transition: all 0.2s;
+        }
+        .hotbar-slot.selected {
+            border-color: #00ffff;
+            background: rgba(0, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
         @media (orientation: portrait) {
             #creator-container {
                 flex-direction: column;
@@ -291,65 +324,6 @@
             #editor-panel {
                 height: 55%; /* Adjust as needed */
             }
-        }
-
-        /* --- Hotbar Styles --- */
-        #hotbar {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 10px;
-            z-index: 95;
-            pointer-events: none; /* ホットバーがクリックイベントを妨害しないように */
-        }
-        .hotbar-slot {
-            width: 50px;
-            height: 50px;
-            background: rgba(0,0,0,0.4);
-            border: 2px solid #888;
-            border-radius: 5px;
-            color: white;
-            font-size: 16px;
-            font-family: monospace;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            user-select: none;
-            padding: 5px;
-            text-align: center;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .hotbar-slot.selected {
-            border-color: #fff;
-            background: rgba(20, 120, 255, 0.5);
-            box-shadow: 0 0 10px #00ffff;
-        }
-
-        /* --- Jetpack Fuel Bar Styles --- */
-        #fuel-bar-container {
-            position: absolute;
-            bottom: 80px; /* Above hotbar */
-            left: 50%;
-            transform: translateX(-50%);
-            width: 230px; /* Matches hotbar width (50*4 + 10*3) */
-            height: 15px;
-            background: rgba(0,0,0,0.4);
-            border: 2px solid #888;
-            border-radius: 5px;
-            display: none; /* Hidden by default */
-            z-index: 95;
-            padding: 2px;
-        }
-        #fuel-bar {
-            width: 100%;
-            height: 100%;
-            background: #00ffff;
-            border-radius: 2px;
-            transition: width 0.2s ease-out;
         }
     </style>
 </head>
@@ -433,15 +407,6 @@
         <div id="dash-button">DASH</div>
         <div id="jump-button">JUMP</div>
     </div>
-    <div id="hotbar">
-        <div class="hotbar-slot" id="slot-1"></div>
-        <div class="hotbar-slot" id="slot-2"></div>
-        <div class="hotbar-slot" id="slot-3"></div>
-        <div class="hotbar-slot" id="slot-4"></div>
-    </div>
-    <div id="fuel-bar-container">
-        <div id="fuel-bar"></div>
-    </div>
     <div id="blocker">
         <div id="instructions">
             <h1>遥かなる稜線</h1>
@@ -454,6 +419,13 @@
                 <span style="font-size: 14px; color: #ddeeff;">果てしなく続く平原と山脈</span>
             </p>
         </div>
+    </div>
+
+    <div id="hotbar">
+        <div class="hotbar-slot" id="slot-0">1: AK</div>
+        <div class="hotbar-slot" id="slot-1">2: Axe</div>
+        <div class="hotbar-slot" id="slot-2">3: C4</div>
+        <div class="hotbar-slot" id="slot-3">4: Jetpack</div>
     </div>
 
     <script type="importmap">
@@ -478,37 +450,9 @@
         let playerBody; 
         let blocker;
         let sky, sun;
-
-        // --- インベントリ & アイテム ---
-        const inventory = {
-            items: [null, null, null, null],
-            selectedSlot: 0, // 0-3
-        };
-
-        const itemManager = {
-            'axe': { name: 'Axe' },
-            'ak47': { name: 'AK-47' },
-            'jetpack': { name: 'Jetpack' },
-            'c4': { name: 'C4' },
-        };
-        const itemModels = {};
-        let viewmodel; // Group for held items
-        let axeSwingState = { active: false, startTime: 0, duration: 300 };
-        let ak47FireState = { active: false, startTime: 0, duration: 100 };
-        const jetpackState = {
-            fuel: 100,
-            maxFuel: 100,
-            consumptionRate: 30, // units per second
-            rechargeRate: 15, // units per second
-            active: false
-        };
-        const c4State = {
-            placedInstance: null,
-            detonationTime: 0,
-            detonationDuration: 500,
-            particles: [],
-            isDetonating: false,
-        };
+        const itemActionRaycaster = new THREE.Raycaster();
+        const activeC4s = [];
+        const activeBullets = [];
         
         const velocity = new THREE.Vector3();
         const direction = new THREE.Vector3();
@@ -521,7 +465,8 @@
 
         // --- アクション・カメラ設定 ---
         let walkCycle = 0;
-        const camOffset = { x: 0, y: 0 }; 
+        const camOffset = { x: 0, y: 0 };
+        let cameraShake = { time: 0, intensity: 0 };
         
         let isLandingAnimActive = false;
         let landingAnimStartTime = 0;
@@ -539,6 +484,8 @@
         const renderDistance = 3; 
         const waterLevel = 22; 
         const chunks = {};
+        const removedTrees = new Set();
+        const terrainDeformations = [];
         const perlin = new ImprovedNoise();
         const seed = Math.random() * 100;
 
@@ -595,50 +542,111 @@
             editMode: 'add', // 'add' or 'remove'
         };
 
-        const characterManager = {
-            defaultCharacters: [
-                {
-                    name: '鹿',
-                    speed: 1.5,
-                    lifespan: 180,
-                    reproduction: 'none',
-                    reproCount: 1,
-                    moveMethod: 'random_walk',
-                    voxels: [
-                        // Body
-                        {x: -1, y: 1, z: 0, color: 0x8B4513}, {x: 0, y: 1, z: 0, color: 0x8B4513},
-                        {x: 1, y: 1, z: 0, color: 0x8B4513}, {x: 2, y: 1, z: 0, color: 0x8B4513},
-                        {x: -1, y: 2, z: 0, color: 0x9F6B3B}, {x: 0, y: 2, z: 0, color: 0x9F6B3B},
-                        {x: 1, y: 2, z: 0, color: 0x9F6B3B}, {x: 2, y: 2, z: 0, color: 0x9F6B3B},
-                        // Legs
-                        {x: -1, y: 0, z: 0, color: 0x5C3317}, {x: 2, y: 0, z: 0, color: 0x5C3317},
-                        {x: -1, y: 0, z: 1, color: 0x5C3317}, {x: 2, y: 0, z: 1, color: 0x5C3317},
-                        // Head
-                        {x: -2, y: 2, z: 0, color: 0x9F6B3B},
-                        // Antlers
-                        {x: -3, y: 3, z: 0, color: 0xF5DEB3}, {x: -3, y: 4, z: 0, color: 0xF5DEB3},
-                        {x: -3, y: 3, z: 1, color: 0xF5DEB3},
-                    ]
-                },
-                {
-                    name: '鳥',
-                    speed: 2.5,
-                    lifespan: 60,
-                    reproduction: 'none',
-                    reproCount: 1,
-                    moveMethod: 'random_walk', // Will hop frequently
-                    voxels: [
-                        // Body
-                        {x: 0, y: 0, z: 0, color: 0x4682B4}, {x: 1, y: 0, z: 0, color: 0x4682B4},
-                        // Wing L
-                        {x: 0, y: 0, z: -1, color: 0x6092c4}, {x: -1, y: 0, z: -1, color: 0x6092c4},
-                        // Wing R
-                        {x: 1, y: 0, z: 1, color: 0x6092c4}, {x: 2, y: 0, z: 1, color: 0x6092c4},
-                        // Beak
-                        {x: -1, y: 0, z: 0, color: 0xFFA500},
-                    ]
-                }
+        // --- Item Management ---
+        let viewModel;
+        const itemManager = {
+            items: [
+                { name: 'AK', model: null },
+                { name: 'Axe', model: null },
+                { name: 'C4', model: null },
+                { name: 'Jetpack', model: null }
             ],
+            selectedItem: 0, // index of the selected item
+            init: () => {
+                // Create placeholder models
+                const akModel = new THREE.Group();
+                const metalMat = new THREE.MeshStandardMaterial({ color: 0x282828, roughness: 0.6 });
+                const woodMat = new THREE.MeshStandardMaterial({ color: 0x693f23, roughness: 0.8 });
+
+                // Metal parts
+                const receiverGeo = new THREE.BoxGeometry(1.0, 0.25, 0.15);
+                const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8);
+                barrelGeo.rotateZ(Math.PI / 2);
+                barrelGeo.translate(0.95, 0.08, 0);
+                const magazineGeo = new THREE.BoxGeometry(0.12, 0.5, 0.12);
+                magazineGeo.translate(0.2, -0.25, 0);
+                const gripGeo = new THREE.BoxGeometry(0.1, 0.4, 0.12);
+                gripGeo.rotateZ(-0.2);
+                gripGeo.translate(-0.15, -0.25, 0);
+                const frontSightGeo = new THREE.BoxGeometry(0.02, 0.08, 0.02);
+                frontSightGeo.translate(1.3, 0.12, 0);
+                const rearSightGeo = new THREE.BoxGeometry(0.03, 0.04, 0.1);
+                rearSightGeo.translate(-0.4, 0.2, 0);
+                const gasTubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8);
+                gasTubeGeo.rotateZ(Math.PI / 2);
+                gasTubeGeo.translate(0.75, 0.2, 0);
+
+                const metalGeos = BufferGeometryUtils.mergeGeometries([receiverGeo, barrelGeo, magazineGeo, gripGeo, frontSightGeo, rearSightGeo, gasTubeGeo]);
+                const metalMesh = new THREE.Mesh(metalGeos, metalMat);
+                akModel.add(metalMesh);
+
+                // Wood parts
+                const stockGeo = new THREE.BoxGeometry(0.8, 0.2, 0.12);
+                stockGeo.translate(-0.9, -0.05, 0);
+                const stockEndGeo = new THREE.BoxGeometry(0.1, 0.25, 0.12);
+                stockEndGeo.translate(-1.25, -0.05, 0);
+                const handguardGeo = new THREE.BoxGeometry(0.5, 0.2, 0.2);
+                handguardGeo.translate(0.75, 0.05, 0);
+
+                const woodGeos = BufferGeometryUtils.mergeGeometries([stockGeo, stockEndGeo, handguardGeo]);
+                const woodMesh = new THREE.Mesh(woodGeos, woodMat);
+                akModel.add(woodMesh);
+
+                akModel.scale.set(0.6, 0.6, 0.6);
+                itemManager.items[0].model = akModel;
+
+
+                const axeGeo = new THREE.BoxGeometry(0.1, 0.8, 0.1);
+                const axeHeadGeo = new THREE.BoxGeometry(0.2, 0.4, 0.3);
+                axeHeadGeo.translate(0, 0.5, 0);
+                const mergedAxeGeo = BufferGeometryUtils.mergeGeometries([axeGeo, axeHeadGeo]);
+                const axeMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+                itemManager.items[1].model = new THREE.Mesh(mergedAxeGeo, axeMat);
+
+                const c4Geo = new THREE.BoxGeometry(0.5, 0.3, 0.7);
+                const c4Mat = new THREE.MeshStandardMaterial({ color: 0x009900 });
+                itemManager.items[2].model = new THREE.Mesh(c4Geo, c4Mat);
+
+                const jetpackGeo = new THREE.BoxGeometry(0.8, 1.0, 0.3);
+                const jetpackMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+                itemManager.items[3].model = new THREE.Mesh(jetpackGeo, jetpackMat);
+                
+                // Position models for viewmodel
+                itemManager.items[0].model.position.set(0.6, -0.4, -1.2);
+                itemManager.items[0].model.rotation.y = Math.PI;
+
+                itemManager.items[1].model.position.set(0.5, -0.5, -1.0);
+                itemManager.items[1].model.rotation.y = Math.PI;
+                itemManager.items[1].model.rotation.z = Math.PI / 8;
+
+                itemManager.items[2].model.position.set(0.5, -0.4, -1.0);
+                itemManager.items[2].model.rotation.y = Math.PI;
+
+                // Jetpack is not held, so it's not positioned in the view model
+            },
+            updateViewModel: () => {
+                if (!viewModel) return;
+                // Clear previous item
+                while(viewModel.children.length > 0){ 
+                    viewModel.remove(viewModel.children[0]); 
+                }
+                // Add new item if it's not the jetpack
+                const selected = itemManager.items[itemManager.selectedItem];
+                if (selected && selected.name !== 'Jetpack' && selected.model) {
+                    viewModel.add(selected.model.clone());
+                }
+            },
+            updateHotbar: () => {
+                for (let i = 0; i < itemManager.items.length; i++) {
+                    const slot = document.getElementById(`slot-${i}`);
+                    if (slot) {
+                        slot.classList.toggle('selected', i === itemManager.selectedItem);
+                    }
+                }
+            }
+        };
+
+        const characterManager = {
             characters: [],
             activeInstances: [],
             
@@ -662,7 +670,7 @@
                 const spawnRadius = 80;
                 const spawnX = (Math.random() - 0.5) * spawnRadius;
                 const spawnZ = 50 + (Math.random() - 0.5) * spawnRadius;
-                const spawnY = getNoiseHeight(spawnX, spawnZ) + 5; // Add offset from ground
+                const spawnY = getFinalHeight(spawnX, spawnZ) + 5; // Add offset from ground
                 
                 character.position.set(spawnX, spawnY, spawnZ);
                 
@@ -709,7 +717,7 @@
                         instance.object3D.position.y += instance.velocity.y * delta;
                     }
 
-                    const groundHeight = getNoiseHeight(instance.object3D.position.x, instance.object3D.position.z);
+                    const groundHeight = getFinalHeight(instance.object3D.position.x, instance.object3D.position.z);
                     if (instance.object3D.position.y < groundHeight) {
                         instance.object3D.position.y = groundHeight;
                         instance.velocity.y = 0;
@@ -815,21 +823,11 @@
             },
 
             loadCharacters: () => {
-                // Start with default characters
-                characterManager.characters = [...characterManager.defaultCharacters];
-
                 const data = localStorage.getItem('voxelGameCharacters');
                 if (data) {
-                    const userCharacters = JSON.parse(data);
-                    // Add user-created characters, preventing duplicates if names match defaults
-                    userCharacters.forEach(userChar => {
-                        if (!characterManager.characters.some(defaultChar => defaultChar.name === userChar.name)) {
-                            characterManager.characters.push(userChar);
-                        }
-                    });
-                    console.log(`${userCharacters.length} user characters loaded.`);
+                    characterManager.characters = JSON.parse(data);
+                    console.log(`${characterManager.characters.length} characters loaded.`);
                 }
-                console.log(`Total characters available: ${characterManager.characters.length}`);
             }
         };
 
@@ -863,6 +861,10 @@
             playerBody.position.set(0, 100, 50); 
             playerBody.add(camera); 
             scene.add(playerBody);
+
+            // ViewModel for first-person items
+            viewModel = new THREE.Group();
+            camera.add(viewModel);
 
             // --- Sky ---
             sky = new Sky();
@@ -932,12 +934,13 @@
                 if (isMobile) return;
                 keyState[e.code] = true;
 
-                // --- アイテム選択 ---
+                // Item switching
                 if (e.code.startsWith('Digit')) {
-                    const slotIndex = parseInt(e.code.slice(5)) - 1;
-                    if (slotIndex >= 0 && slotIndex < inventory.items.length) {
-                        inventory.selectedSlot = slotIndex;
-                        updateHotbarUI();
+                    const digit = parseInt(e.code.slice(5)) - 1;
+                    if (digit >= 0 && digit < itemManager.items.length) {
+                        itemManager.selectedItem = digit;
+                        itemManager.updateViewModel();
+                        itemManager.updateHotbar();
                     }
                 }
             };
@@ -948,6 +951,120 @@
             };
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
+
+            window.addEventListener('pointerdown', (event) => {
+                // Check if the game is active and not in creator mode
+                if ((!controls.isLocked && !isMobile) || creator.isOpen) return;
+                // Use primary button for actions (left mouse, touch)
+                if (event.button !== 0 && event.pointerType === 'mouse') return;
+
+                const selectedItem = itemManager.items[itemManager.selectedItem];
+
+                if (selectedItem.name === 'Axe') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    
+                    const treeMeshes = [];
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        // Find the tree InstancedMesh in the chunk
+                        const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                        if (treeMesh) {
+                            treeMeshes.push(treeMesh);
+                        }
+                    }
+
+                    if (treeMeshes.length > 0) {
+                        const intersects = itemActionRaycaster.intersectObjects(treeMeshes);
+
+                        if (intersects.length > 0) {
+                            const intersection = intersects[0];
+                            // Check if the tree is within reach
+                            if (intersection.distance < 15) { 
+                                const hitInstanceId = intersection.instanceId;
+                                const treeMesh = intersection.object;
+                                const treeId = treeMesh.userData.instanceIds[hitInstanceId];
+
+                                if (treeId && !removedTrees.has(treeId)) {
+                                    removedTrees.add(treeId);
+
+                                    // "Remove" the tree by setting its matrix to a scale of 0
+                                    const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                                    treeMesh.setMatrixAt(hitInstanceId, zeroMatrix);
+                                    treeMesh.instanceMatrix.needsUpdate = true;
+
+                                    console.log(`Removed tree: ${treeId}`);
+                                }
+                            }
+                        }
+                    }
+                } else if (selectedItem.name === 'C4') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    
+                    const terrainMeshes = [];
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        const terrainMesh = chunk.children.find(c => c.geometry.type === 'PlaneGeometry' && c.material.vertexColors);
+                        const waterMesh = chunk.children.find(c => c.material === waterMaterial);
+                        if (terrainMesh) terrainMeshes.push(terrainMesh);
+                        if (waterMesh) terrainMeshes.push(waterMesh);
+                    }
+
+                    const intersects = itemActionRaycaster.intersectObjects(terrainMeshes);
+
+                    if (intersects.length > 0) {
+                        const intersection = intersects[0];
+                        if (intersection.distance < 15) {
+                            const c4Model = itemManager.items[2].model.clone();
+                            c4Model.position.copy(intersection.point);
+                            c4Model.rotation.y = Math.random() * Math.PI * 2;
+                            scene.add(c4Model);
+
+                            activeC4s.push({
+                                model: c4Model,
+                                placedTime: performance.now()
+                            });
+                            console.log('C4 placed at', c4Model.position);
+                        }
+                    }
+                } else if (selectedItem.name === 'AK') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    const intersects = itemActionRaycaster.intersectObjects(scene.children, true);
+                    
+                    let endPoint;
+                    if (intersects.length > 0) {
+                        endPoint = intersects[0].point;
+                    } else {
+                        endPoint = new THREE.Vector3();
+                        camera.getWorldDirection(endPoint).multiplyScalar(1000).add(camera.getWorldPosition(new THREE.Vector3()));
+                    }
+
+                    const gunTip = new THREE.Vector3(0.6, -0.4, -2.5); // Local position in viewmodel
+                    gunTip.applyMatrix4(viewModel.matrixWorld);
+
+                    // Tracer line
+                    const tracerGeo = new THREE.BufferGeometry().setFromPoints([gunTip, endPoint]);
+                    const tracerMat = new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
+                    const tracerLine = new THREE.Line(tracerGeo, tracerMat);
+                    tracerLine.userData.startTime = performance.now();
+                    scene.add(tracerLine);
+                    activeBullets.push({ object: tracerLine, type: 'tracer' });
+
+                    // Hit effect
+                    const hitGeo = new THREE.SphereGeometry(0.2, 8, 8);
+                    const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+                    const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+                    hitSphere.position.copy(endPoint);
+                    hitSphere.userData.startTime = performance.now();
+                    scene.add(hitSphere);
+                    activeBullets.push({ object: hitSphere, type: 'hit' });
+
+                    // Muzzle flash
+                    const muzzleFlash = new THREE.PointLight(0xffcc33, 10, 5);
+                    muzzleFlash.position.copy(gunTip);
+                    scene.add(muzzleFlash);
+                    setTimeout(() => scene.remove(muzzleFlash), 50);
+                }
+            });
 
             if (isMobile) {
                 setupMobileControls();
@@ -966,197 +1083,12 @@
             document.body.appendChild(renderer.domElement);
             window.addEventListener('resize', onWindowResize);
 
+            itemManager.init();
+            itemManager.updateViewModel();
+            itemManager.updateHotbar();
             characterManager.loadCharacters();
             initCreator();
-
-            // --- 初期インベントリ設定 ---
-            inventory.items[0] = 'axe';
-            inventory.items[1] = 'ak47';
-            inventory.items[2] = 'jetpack';
-            inventory.items[3] = 'c4';
-            updateHotbarUI();
-
-            // --- Viewmodel Setup ---
-            viewmodel = new THREE.Group();
-            camera.add(viewmodel);
-            viewmodel.position.set(0.6, -0.4, -1);
-
-            // --- Create Item Models ---
-            const handleMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8, flatShading: true });
-            const headMat = new THREE.MeshStandardMaterial({ color: 0x808080, metalness: 0.8, roughness: 0.4, flatShading: true });
-            
-            const handleGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.8, 8);
-            handleGeo.translate(0, -0.4, 0);
-            const headGeo = new THREE.BoxGeometry(0.1, 0.4, 0.3);
-            headGeo.translate(0, 0, 0.1);
-            
-            const axeModel = new THREE.Group();
-            axeModel.add(new THREE.Mesh(handleGeo, handleMat));
-            axeModel.add(new THREE.Mesh(headGeo, headMat));
-            axeModel.rotation.z = Math.PI / 4;
-            itemModels.axe = axeModel;
-
-            // --- AK-47 Model ---
-            const ak47Model = new THREE.Group();
-            const stockGeo = new THREE.BoxGeometry(0.6, 0.1, 0.1);
-            stockGeo.translate(-0.2, 0, 0);
-            const bodyGeo = new THREE.BoxGeometry(0.4, 0.15, 0.12);
-            bodyGeo.translate(0.3, 0.05, 0);
-            const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8);
-            barrelGeo.rotateZ(Math.PI/2);
-            barrelGeo.translate(0.75, 0.08, 0);
-            const magGeo = new THREE.BoxGeometry(0.1, 0.3, 0.1);
-            magGeo.translate(0.3, -0.1, 0);
-            magGeo.rotateZ(-0.2);
-
-            const woodMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, flatShading: true });
-            const metalMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.5, flatShading: true });
-            
-            ak47Model.add(new THREE.Mesh(stockGeo, woodMat));
-            ak47Model.add(new THREE.Mesh(bodyGeo, metalMat));
-            ak47Model.add(new THREE.Mesh(barrelGeo, metalMat));
-            ak47Model.add(new THREE.Mesh(magGeo, metalMat));
-            ak47Model.scale.set(0.8, 0.8, 0.8);
-            
-            // Muzzle flash
-            const flashMat = new THREE.SpriteMaterial({ color: 0xffff00, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.8 });
-            const muzzleFlash = new THREE.Sprite(flashMat);
-            muzzleFlash.position.set(1, 0.08, 0); // Barrel end
-            muzzleFlash.scale.set(0.5, 0.5, 0.5);
-            muzzleFlash.visible = false;
-            ak47Model.add(muzzleFlash);
-            itemModels.ak47_flash = muzzleFlash; // Store reference
-
-            itemModels.ak47 = ak47Model;
-            
-            // --- Jetpack Model ---
-            const jetpackModel = new THREE.Group();
-            const tankGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.5, 12);
-            const nozzleGeo = new THREE.ConeGeometry(0.08, 0.15, 8);
-
-            const tank1 = new THREE.Mesh(tankGeo, metalMat);
-            tank1.position.x = -0.15;
-            const tank2 = new THREE.Mesh(tankGeo, metalMat);
-            tank2.position.x = 0.15;
-
-            const nozzle1 = new THREE.Mesh(nozzleGeo, headMat); // Using axe head material for contrast
-            nozzle1.position.set(-0.15, -0.3, 0);
-            nozzle1.rotation.x = Math.PI;
-            const nozzle2 = new THREE.Mesh(nozzleGeo, headMat);
-            nozzle2.position.set(0.15, -0.3, 0);
-            nozzle2.rotation.x = Math.PI;
-            
-            jetpackModel.add(tank1);
-            jetpackModel.add(tank2);
-            jetpackModel.add(nozzle1);
-            jetpackModel.add(nozzle2);
-            jetpackModel.scale.set(0.7, 0.7, 0.7);
-            jetpackModel.position.set(0, 0.2, 0.2); // Adjust position to not clip with camera
-            jetpackModel.rotation.x = 0.2;
-            itemModels.jetpack = jetpackModel;
-
-            // Initially hide all models
-            Object.values(itemModels).forEach(model => { if(model.isObject3D) model.visible = false; });
-            viewmodel.add(itemModels.axe);
-            viewmodel.add(itemModels.ak47);
-            viewmodel.add(itemModels.jetpack);
-            
-            // --- C4 Model ---
-            const c4Model = new THREE.Group();
-            const c4Block = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.3), new THREE.MeshStandardMaterial({ color: 0x222228, flatShading: true }));
-            const c4Light = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 8), new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1 }));
-            c4Light.position.y = 0.06;
-            c4Model.add(c4Block);
-            c4Model.add(c4Light);
-            itemModels.c4_light = c4Light;
-            itemModels.c4 = c4Model;
-            viewmodel.add(c4Model);
-
-            // Initially hide all models - run again to include C4
-            Object.values(itemModels).forEach(model => { if(model.isObject3D) model.visible = false; });
         }
-
-        function updateHeldItem() {
-            const selectedItemKey = inventory.items[inventory.selectedSlot];
-            for (const key in itemModels) {
-                if (itemModels[key] && itemModels[key].isObject3D) {
-                    itemModels[key].visible = (key === selectedItemKey);
-                }
-            }
-            // Show/hide fuel bar
-            document.getElementById('fuel-bar-container').style.display = (selectedItemKey === 'jetpack') ? 'block' : 'none';
-        }
-
-        function updateHotbarUI() {
-            for (let i = 0; i < inventory.items.length; i++) {
-                const slot = document.getElementById(`slot-${i + 1}`);
-                if (!slot) continue;
-                const itemKey = inventory.items[i];
-                if (itemKey && itemManager[itemKey]) {
-                    slot.textContent = itemManager[itemKey].name;
-                } else {
-                    slot.textContent = '';
-                }
-
-                if (i === inventory.selectedSlot) {
-                    slot.classList.add('selected');
-                } else {
-                    slot.classList.remove('selected');
-                }
-            }
-            updateHeldItem();
-        }
-
-        window.addEventListener('mousedown', (event) => {
-            if (event.button === 0 && (controls.isLocked || isMobile)) { // Left click
-                const selectedItemKey = inventory.items[inventory.selectedSlot];
-                if (selectedItemKey === 'axe' && !axeSwingState.active) {
-                    axeSwingState.active = true;
-                    axeSwingState.startTime = performance.now();
-                } else if (selectedItemKey === 'ak47') {
-                    ak47FireState.active = true;
-                    ak47FireState.startTime = performance.now();
-                    itemModels.ak47_flash.visible = true;
-                    // Play sound
-                } else if (selectedItemKey === 'c4') {
-                    if (!c4State.placedInstance) {
-                        // Place C4
-                        const raycaster = new THREE.Raycaster();
-                        raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-                        const intersects = raycaster.intersectObjects(scene.children, true);
-                        const groundIntersect = intersects.find(i => !i.object.isSprite && i.object.geometry.type !== 'BufferGeometry');
-                        
-                        if (groundIntersect && groundIntersect.point.distanceTo(playerBody.position) < 15) {
-                            c4State.placedInstance = itemModels.c4.clone();
-                            c4State.placedInstance.position.copy(groundIntersect.point);
-                            c4State.placedInstance.lookAt(playerBody.position);
-                            scene.add(c4State.placedInstance);
-                            itemModels.c4.visible = false; // Hide from viewmodel
-                        }
-                    } else if (!c4State.isDetonating) {
-                        // Detonate C4
-                        c4State.isDetonating = true;
-                        c4State.detonationTime = performance.now();
-                        c4State.placedInstance.children[1].material.emissiveIntensity = 0; // Turn off light
-                        
-                        // Create particles
-                        const particleCount = 50;
-                        const particleMat = new THREE.MeshBasicMaterial({ color: 0xffa500 });
-                        for (let i = 0; i < particleCount; i++) {
-                            const particle = new THREE.Mesh(new THREE.SphereGeometry(0.1, 4, 4), particleMat);
-                            particle.position.copy(c4State.placedInstance.position);
-                            particle.velocity = new THREE.Vector3(
-                                (Math.random() - 0.5) * 20,
-                                Math.random() * 20,
-                                (Math.random() - 0.5) * 20
-                            );
-                            c4State.particles.push(particle);
-                            scene.add(particle);
-                        }
-                    }
-                }
-            }
-        });
 
         function exportCharacter() {
             const name = document.getElementById('char-name').value;
@@ -1644,11 +1576,23 @@
             return finalHeight; 
         }
 
+        function getFinalHeight(x, z) {
+            let height = getNoiseHeight(x, z);
+            for (const deform of terrainDeformations) {
+                const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+                if (distance < deform.radius) {
+                    const depression = deform.maxDepth * (1 - (distance / deform.radius));
+                    height += depression;
+                }
+            }
+            return height;
+        }
+
         function getSlope(x, z) {
             const step = 2;
-            const h = getNoiseHeight(x, z);
-            const hx = getNoiseHeight(x + step, z);
-            const hz = getNoiseHeight(x, z + step);
+            const h = getFinalHeight(x, z);
+            const hx = getFinalHeight(x + step, z);
+            const hz = getFinalHeight(x, z + step);
             const dx = (hx - h) / step;
             const dz = (hz - h) / step;
             return Math.sqrt(dx*dx + dz*dz);
@@ -1684,14 +1628,28 @@
             for (let i = 0; i < posAttr.count; i++) {
                 const x = posAttr.getX(i) + (cx * chunkSize);
                 const z = posAttr.getZ(i) + (cz * chunkSize);
-                const y = getNoiseHeight(x, z);
+                const y = getFinalHeight(x, z);
                 posAttr.setY(i, y);
-                if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
-                else if (y < 120) {
-                    const n = perlin.noise(x*0.02, z*0.02, seed);
-                    colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
-                } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
-                else colors.push(0.96, 0.98, 1.0); 
+
+                let inCrater = false;
+                for (const deform of terrainDeformations) {
+                    const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+                    if (distance < deform.radius) {
+                        inCrater = true;
+                        break;
+                    }
+                }
+
+                if (inCrater) {
+                    colors.push(0.2, 0.2, 0.2); // Scorched earth color
+                } else {
+                    if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
+                    else if (y < 120) {
+                        const n = perlin.noise(x*0.02, z*0.02, seed);
+                        colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
+                    } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
+                    else colors.push(0.96, 0.98, 1.0);
+                }
             }
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             geometry.computeVertexNormals();
@@ -1708,12 +1666,16 @@
             const treeCount = 60; 
             const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
             treeMesh.castShadow = true; treeMesh.receiveShadow = true;
+            treeMesh.userData.instanceIds = {}; // Initialize once before the loop
             const dummy = new THREE.Object3D();
             let tIdx = 0;
             for (let i = 0; i < treeCount; i++) {
+                const treeId = `${cx},${cz},${i}`;
+                if (removedTrees.has(treeId)) continue;
+
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
                 const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
                 if (h > waterLevel + 4 && slope < 1.2 && h < 250 && Math.random() > 0.4) {
                     dummy.position.set(rx, h, rz);
@@ -1721,7 +1683,9 @@
                     dummy.scale.set(s, s, s);
                     dummy.rotation.y = Math.random() * Math.PI * 2;
                     dummy.updateMatrix();
-                    treeMesh.setMatrixAt(tIdx++, dummy.matrix);
+                    treeMesh.setMatrixAt(tIdx, dummy.matrix);
+                    treeMesh.userData.instanceIds[tIdx] = treeId;
+                    tIdx++;
                 }
             }
             treeMesh.count = tIdx; 
@@ -1734,7 +1698,7 @@
             for (let i = 0; i < grassCount; i++) {
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
                 const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
                 if (h > waterLevel + 2 && h < 250 && slope < 0.8) {
                     dummy.position.set(rx, h, rz);
@@ -1759,6 +1723,209 @@
         }
 
         function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+
+        function deformTerrain(position) {
+            const radius = 45;
+            const maxDepth = -15;
+
+            // Store the deformation data for persistence
+            terrainDeformations.push({ position: position.clone(), radius, maxDepth });
+
+            const affectedChunks = new Set();
+            
+            // Find which chunks are affected by the explosion
+            for (let x = -1; x <= 1; x++) {
+                for (let z = -1; z <= 1; z++) {
+                    const chunkX = Math.floor((position.x + x * radius) / chunkSize);
+                    const chunkZ = Math.floor((position.z + z * radius) / chunkSize);
+                    const key = `${chunkX},${chunkZ}`;
+                    if (chunks[key]) {
+                        affectedChunks.add(chunks[key]);
+                    }
+                }
+            }
+
+            affectedChunks.forEach(chunk => {
+                const terrainMesh = chunk.children.find(c => c.geometry.type === 'PlaneGeometry' && c.material.vertexColors);
+                if (terrainMesh) {
+                    const posAttr = terrainMesh.geometry.attributes.position;
+                    let needsUpdate = false;
+                    const colorAttr = terrainMesh.geometry.attributes.color;
+                    for (let i = 0; i < posAttr.count; i++) {
+                        const vertex = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+                        vertex.add(terrainMesh.position); // Convert to world coordinates
+                        
+                        const distance = vertex.distanceTo(position);
+                        if (distance < radius) {
+                            // Deform height
+                            const depression = maxDepth * (1 - (distance / radius));
+                            const newY = posAttr.getY(i) + depression;
+                            posAttr.setY(i, newY);
+
+                            // Update color to scorched
+                            colorAttr.setXYZ(i, 0.2, 0.2, 0.2);
+
+                            needsUpdate = true;
+                        }
+                    }
+                    if (needsUpdate) {
+                        posAttr.needsUpdate = true;
+                        colorAttr.needsUpdate = true;
+                        terrainMesh.geometry.computeVertexNormals();
+                    }
+                }
+            });
+        }
+
+        function updateC4(time, delta) {
+            for (let i = activeC4s.length - 1; i >= 0; i--) {
+                const c4 = activeC4s[i];
+                const elapsedTime = (time - c4.placedTime) / 1000;
+
+                if (elapsedTime > 3) { // Detonate after 3 seconds
+                    // Create explosion particles
+                    createExplosionParticles(c4.model.position);
+                    
+                    // Add flash of light
+                    const explosionLight = new THREE.PointLight(0xffffff, 100, 200);
+                    explosionLight.position.copy(c4.model.position);
+                    scene.add(explosionLight);
+                    setTimeout(() => scene.remove(explosionLight), 200);
+
+                    // Apply force to player if nearby
+                    const distanceToPlayer = playerBody.position.distanceTo(c4.model.position);
+                    if (distanceToPlayer < 80) { // Increased blast radius for force
+                        const blastDirection = new THREE.Vector3().subVectors(playerBody.position, c4.model.position).normalize();
+                        const blastForce = (1.0 - (distanceToPlayer / 80)) * 4000;
+                        velocity.add(blastDirection.multiplyScalar(blastForce));
+                        
+                        // Set camera shake based on distance
+                        cameraShake.time = 0.8; // duration
+                        cameraShake.intensity = (1.0 - (distanceToPlayer / 80)) * 0.4;
+                    }
+
+                    // Deform terrain and destroy trees
+                    deformTerrain(c4.model.position);
+                    const explosionRadius = 60; // Increased radius
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                        if (treeMesh) {
+                            const dummy = new THREE.Object3D();
+                            let needsUpdate = false;
+                            for (let i = 0; i < treeMesh.count; i++) {
+                                const treeId = treeMesh.userData.instanceIds[i];
+                                if (!treeId || removedTrees.has(treeId)) continue;
+                                
+                                treeMesh.getMatrixAt(i, dummy.matrix);
+                                const treePosition = new THREE.Vector3().setFromMatrixPosition(dummy.matrix);
+                                treePosition.add(treeMesh.position);
+
+                                if (treePosition.distanceTo(c4.model.position) < explosionRadius) {
+                                    removedTrees.add(treeId);
+                                    const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                                    treeMesh.setMatrixAt(i, zeroMatrix);
+                                    needsUpdate = true;
+                                }
+                            }
+                            if (needsUpdate) {
+                                treeMesh.instanceMatrix.needsUpdate = true;
+                            }
+                        }
+                    }
+
+
+                    // Remove C4 from scene and array
+                    scene.remove(c4.model);
+                    activeC4s.splice(i, 1);
+                }
+            }
+        }
+
+        let explosionParticles = [];
+        function createExplosionParticles(position) {
+            // --- Fireball ---
+            const fireCount = 150;
+            const fireGeo = new THREE.BufferGeometry();
+            const firePos = new Float32Array(fireCount * 3);
+            const fireVel = new Float32Array(fireCount * 3);
+            const fireColors = new Float32Array(fireCount * 3);
+
+            for (let i = 0; i < fireCount; i++) {
+                const phi = Math.acos(-1 + (2 * i) / fireCount);
+                const theta = Math.sqrt(fireCount * Math.PI) * phi;
+                const x = Math.cos(theta) * Math.sin(phi);
+                const y = Math.sin(theta) * Math.sin(phi);
+                const z = Math.cos(phi);
+
+                const speed = 20 + Math.random() * 30;
+
+                firePos[i * 3 + 0] = position.x;
+                firePos[i * 3 + 1] = position.y;
+                firePos[i * 3 + 2] = position.z;
+
+                fireVel[i * 3 + 0] = x * speed;
+                fireVel[i * 3 + 1] = y * speed * 0.8; // Slightly less vertical
+                fireVel[i * 3 + 2] = z * speed;
+                
+                const color = new THREE.Color();
+                color.setHSL(0.1 * Math.random(), 1.0, 0.5);
+                fireColors[i * 3 + 0] = color.r;
+                fireColors[i * 3 + 1] = color.g;
+                fireColors[i * 3 + 2] = color.b;
+            }
+            fireGeo.setAttribute('position', new THREE.BufferAttribute(firePos, 3));
+            fireGeo.setAttribute('velocity', new THREE.BufferAttribute(fireVel, 3));
+            fireGeo.setAttribute('color', new THREE.BufferAttribute(fireColors, 3));
+            
+            const fireMat = new THREE.PointsMaterial({
+                vertexColors: true,
+                size: 3.0,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            const fireball = new THREE.Points(fireGeo, fireMat);
+            fireball.userData = { startTime: performance.now(), type: 'fire', duration: 0.8 };
+            scene.add(fireball);
+            explosionParticles.push(fireball);
+
+            // --- Smoke ---
+            const smokeCount = 250;
+            const smokeGeo = new THREE.BufferGeometry();
+            const smokePos = new Float32Array(smokeCount * 3);
+            const smokeVel = new Float32Array(smokeCount * 3);
+
+            for (let i = 0; i < smokeCount; i++) {
+                const x = (Math.random() - 0.5) * 2;
+                const y = Math.random();
+                const z = (Math.random() - 0.5) * 2;
+                const dir = new THREE.Vector3(x, y, z).normalize();
+
+                const speed = 10 + Math.random() * 20;
+
+                smokePos[i * 3 + 0] = position.x + (Math.random()-0.5) * 5;
+                smokePos[i * 3 + 1] = position.y + (Math.random()-0.5) * 5;
+                smokePos[i * 3 + 2] = position.z + (Math.random()-0.5) * 5;
+
+                smokeVel[i * 3 + 0] = dir.x * speed;
+                smokeVel[i * 3 + 1] = dir.y * speed + 10; // Bias upwards
+                smokeVel[i * 3 + 2] = dir.z * speed;
+            }
+            smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3));
+            smokeGeo.setAttribute('velocity', new THREE.BufferAttribute(smokeVel, 3));
+
+            const smokeMat = new THREE.PointsMaterial({
+                color: 0x333333,
+                size: 8.0,
+                transparent: true,
+                depthWrite: false
+            });
+            const smoke = new THREE.Points(smokeGeo, smokeMat);
+            smoke.userData = { startTime: performance.now(), type: 'smoke', duration: 3.5 };
+            scene.add(smoke);
+            explosionParticles.push(smoke);
+        }
 
         function handleGamepadInput() {
             if (!gamepadConnected) return; 
@@ -1802,8 +1969,7 @@
             moveLeft = keyState['KeyA'] || false;
             moveRight = keyState['KeyD'] || false;
             isSprinting = keyState['ShiftLeft'] || false;
-            // Jump logic is now mutually exclusive with jetpack
-            if (keyState['Space'] && canJump && !isLandingAnimActive && inventory.items[inventory.selectedSlot] !== 'jetpack') {
+            if (keyState['Space'] && canJump && !isLandingAnimActive) {
                 velocity.y += 160;
                 canJump = false;
             }
@@ -1832,6 +1998,59 @@
             }
 
             if (gameActive) {
+                updateC4(time, delta);
+
+                // Update bullet effects
+                for (let i = activeBullets.length - 1; i >= 0; i--) {
+                    const bullet = activeBullets[i];
+                    const elapsedTime = (time - bullet.object.userData.startTime) / 1000;
+                    let duration = bullet.type === 'tracer' ? 0.1 : 0.3;
+
+                    if (elapsedTime > duration) {
+                        scene.remove(bullet.object);
+                        if (bullet.object.geometry) bullet.object.geometry.dispose();
+                        if (bullet.object.material) bullet.object.material.dispose();
+                        activeBullets.splice(i, 1);
+                    } else {
+                        bullet.object.material.opacity = 1.0 - (elapsedTime / duration);
+                    }
+                }
+
+
+                // Update explosion particles
+                for (let i = explosionParticles.length - 1; i >= 0; i--) {
+                    const particleSystem = explosionParticles[i];
+                    const elapsedTime = (time - particleSystem.userData.startTime) / 1000;
+                    const duration = particleSystem.userData.duration;
+
+                    if (elapsedTime > duration) {
+                        scene.remove(particleSystem);
+                        particleSystem.geometry.dispose();
+                        particleSystem.material.dispose();
+                        explosionParticles.splice(i, 1);
+                        continue;
+                    }
+
+                    const positions = particleSystem.geometry.attributes.position;
+                    const velocities = particleSystem.geometry.attributes.velocity;
+                    
+                    for (let j = 0; j < positions.count; j++) {
+                        positions.setX(j, positions.getX(j) + velocities.getX(j) * delta);
+                        positions.setY(j, positions.getY(j) + velocities.getY(j) * delta);
+                        positions.setZ(j, positions.getZ(j) + velocities.getZ(j) * delta);
+                        
+                        if (particleSystem.userData.type === 'fire') {
+                            velocities.setY(j, velocities.getY(j) - 9.8 * delta * 3.0); // Gravity on fire
+                        } else { // smoke
+                            velocities.setX(j, velocities.getX(j) * (1.0 - delta * 0.2)); // Air drag
+                            velocities.setZ(j, velocities.getZ(j) * (1.0 - delta * 0.2));
+                            velocities.setY(j, velocities.getY(j) * (1.0 - delta * 0.1));
+                        }
+                    }
+                    positions.needsUpdate = true;
+                    particleSystem.material.opacity = 1.0 - (elapsedTime / duration);
+                }
+
                 characterManager.update(delta, time);
                 updateChunks();
                 const body = playerBody;
@@ -1841,24 +2060,11 @@
                 velocity.z -= velocity.z * dampingZ * delta;
                 velocity.y -= 9.8 * 60.0 * delta; 
 
-                // --- Jetpack Logic ---
-                const selectedItem = inventory.items[inventory.selectedSlot];
-                jetpackState.active = (selectedItem === 'jetpack' && (keyState['Space'] || (gamepadConnected && navigator.getGamepads()[0]?.buttons[0].pressed)) && jetpackState.fuel > 0);
-
-                if (jetpackState.active) {
-                    velocity.y += 160 * delta; // Upward thrust, similar to jump power
-                    jetpackState.fuel -= jetpackState.consumptionRate * delta;
-                    canJump = false; // Prevent jumping/landing anim while flying
-                } else {
-                    // Recharge fuel only when not active
-                    if (jetpackState.fuel < jetpackState.maxFuel) {
-                         jetpackState.fuel += jetpackState.rechargeRate * delta;
-                    }
+                // Jetpack logic
+                const selectedItem = itemManager.items[itemManager.selectedItem];
+                if (selectedItem && selectedItem.name === 'Jetpack' && keyState['Space']) {
+                    velocity.y += 9.8 * 90.0 * delta; // Apply upward force to counteract gravity and ascend
                 }
-                jetpackState.fuel = Math.max(0, Math.min(jetpackState.maxFuel, jetpackState.fuel));
-
-                // Update UI
-                document.getElementById('fuel-bar').style.width = `${(jetpackState.fuel / jetpackState.maxFuel) * 100}%`;
 
                 // --- 移動方向の決定 ---
                 if (isMobile && activeTouch.joystick !== null) {
@@ -1923,7 +2129,7 @@
                 
                 body.position.y += (velocity.y * delta); 
 
-                const groundHeight = getNoiseHeight(body.position.x, body.position.z);
+                const groundHeight = getFinalHeight(body.position.x, body.position.z);
                 
                 if (body.position.y < groundHeight + standingEyeHeight) {
                     if (!canJump) { 
@@ -1981,6 +2187,15 @@
 
                 camera.position.y = standingEyeHeight + camOffset.y + landingAnimOffsetHeight;
                 camera.position.x = camOffset.x;
+
+                // Apply camera shake
+                if (cameraShake.time > 0) {
+                    cameraShake.time -= delta;
+                    const shakeAmount = cameraShake.intensity * Math.sin(cameraShake.time * 50);
+                    camera.position.x += shakeAmount;
+                    camera.position.y += shakeAmount;
+                }
+
                 camera.rotation.z = targetTiltAngle; 
                 camera.rotation.x += landingAnimRotationX; 
                 
@@ -1989,65 +2204,6 @@
                 camera.updateProjectionMatrix();
 
                 speedLines.style.opacity = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
-
-                // --- Axe Swing Animation ---
-                if (axeSwingState.active) {
-                    const elapsed = time - axeSwingState.startTime;
-                    if (elapsed < axeSwingState.duration) {
-                        const t = elapsed / axeSwingState.duration;
-                        const swingAngle = Math.sin(t * Math.PI) * 1.5; // Simple swing motion
-                        viewmodel.rotation.x = -swingAngle;
-                        viewmodel.rotation.z = swingAngle * 0.5;
-                        viewmodel.position.z = -1 + Math.sin(t * Math.PI) * 0.5;
-                    } else {
-                        axeSwingState.active = false;
-                        viewmodel.rotation.set(0, 0, 0);
-                        viewmodel.position.z = -1;
-                    }
-                }
-
-                // --- AK-47 Fire Animation ---
-                if (ak47FireState.active) {
-                    const elapsed = time - ak47FireState.startTime;
-                    if (elapsed < ak47FireState.duration) {
-                        const t = elapsed / ak47FireState.duration;
-                        viewmodel.position.z = -1 - Math.sin(t * Math.PI) * 0.1; // Recoil
-                        viewmodel.rotation.x = Math.sin(t * Math.PI) * 0.05;
-                    } else {
-                        ak47FireState.active = false;
-                        itemModels.ak47_flash.visible = false;
-                        // Reset position in case of leftover state
-                        if(inventory.items[inventory.selectedSlot] === 'ak47'){
-                           viewmodel.rotation.set(0,0,0);
-                           viewmodel.position.z = -1;
-                        }
-                    }
-                }
-
-                // --- C4 Logic ---
-                if(c4State.placedInstance && !c4State.isDetonating) {
-                    // Blinking light
-                    const light = c4State.placedInstance.children[1];
-                    light.material.emissiveIntensity = (Math.sin(time * 0.01) + 1) * 0.5;
-                }
-                if (c4State.isDetonating) {
-                    const elapsed = time - c4State.detonationTime;
-                    if (elapsed < c4State.detonationDuration) {
-                        for (let i = c4State.particles.length - 1; i >= 0; i--) {
-                            const p = c4State.particles[i];
-                            p.velocity.y -= 9.8 * delta;
-                            p.position.add(p.velocity.clone().multiplyScalar(delta));
-                        }
-                    } else {
-                        // Cleanup
-                        c4State.particles.forEach(p => scene.remove(p));
-                        scene.remove(c4State.placedInstance);
-                        c4State.particles = [];
-                        c4State.placedInstance = null;
-                        c4State.isDetonating = false;
-                        updateHeldItem(); // Show C4 in hand again
-                    }
-                }
             }
             renderer.render(scene, camera);
         }
