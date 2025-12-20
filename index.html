@@ -7,9 +7,9 @@
     <link rel="apple-touch-icon" href="icon192x192.png">
     <link rel="icon" href="icon192x192.png">
     <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
-        }
+        // if ('serviceWorker' in navigator) {
+        //     navigator.serviceWorker.register('sw.js');
+        // }
     </script>
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #aaccff; }
@@ -279,6 +279,39 @@
             border-color: #00aaff;
         }
 
+        /* --- Hotbar Styles --- */
+        #hotbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        .hotbar-slot {
+            width: 60px;
+            height: 60px;
+            border: 2px solid #888;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 12px;
+            user-select: none;
+            transition: all 0.2s;
+        }
+        .hotbar-slot.selected {
+            border-color: #00ffff;
+            background: rgba(0, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
         @media (orientation: portrait) {
             #creator-container {
                 flex-direction: column;
@@ -388,6 +421,13 @@
         </div>
     </div>
 
+    <div id="hotbar">
+        <div class="hotbar-slot" id="slot-0">1: AK</div>
+        <div class="hotbar-slot" id="slot-1">2: Axe</div>
+        <div class="hotbar-slot" id="slot-2">3: C4</div>
+        <div class="hotbar-slot" id="slot-3">4: Jetpack</div>
+    </div>
+
     <script type="importmap">
         {
             "imports": {
@@ -410,6 +450,9 @@
         let playerBody; 
         let blocker;
         let sky, sun;
+        const itemActionRaycaster = new THREE.Raycaster();
+        const activeC4s = [];
+        const activeBullets = [];
         
         const velocity = new THREE.Vector3();
         const direction = new THREE.Vector3();
@@ -422,7 +465,8 @@
 
         // --- アクション・カメラ設定 ---
         let walkCycle = 0;
-        const camOffset = { x: 0, y: 0 }; 
+        const camOffset = { x: 0, y: 0 };
+        let cameraShake = { time: 0, intensity: 0 };
         
         let isLandingAnimActive = false;
         let landingAnimStartTime = 0;
@@ -440,6 +484,8 @@
         const renderDistance = 3; 
         const waterLevel = 22; 
         const chunks = {};
+        const removedTrees = new Set();
+        const terrainDeformations = [];
         const perlin = new ImprovedNoise();
         const seed = Math.random() * 100;
 
@@ -496,6 +542,110 @@
             editMode: 'add', // 'add' or 'remove'
         };
 
+        // --- Item Management ---
+        let viewModel;
+        const itemManager = {
+            items: [
+                { name: 'AK', model: null },
+                { name: 'Axe', model: null },
+                { name: 'C4', model: null },
+                { name: 'Jetpack', model: null }
+            ],
+            selectedItem: 0, // index of the selected item
+            init: () => {
+                // Create placeholder models
+                const akModel = new THREE.Group();
+                const metalMat = new THREE.MeshStandardMaterial({ color: 0x282828, roughness: 0.6 });
+                const woodMat = new THREE.MeshStandardMaterial({ color: 0x693f23, roughness: 0.8 });
+
+                // Metal parts
+                const receiverGeo = new THREE.BoxGeometry(1.0, 0.25, 0.15);
+                const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8);
+                barrelGeo.rotateZ(Math.PI / 2);
+                barrelGeo.translate(0.95, 0.08, 0);
+                const magazineGeo = new THREE.BoxGeometry(0.12, 0.5, 0.12);
+                magazineGeo.translate(0.2, -0.25, 0);
+                const gripGeo = new THREE.BoxGeometry(0.1, 0.4, 0.12);
+                gripGeo.rotateZ(-0.2);
+                gripGeo.translate(-0.15, -0.25, 0);
+                const frontSightGeo = new THREE.BoxGeometry(0.02, 0.08, 0.02);
+                frontSightGeo.translate(1.3, 0.12, 0);
+                const rearSightGeo = new THREE.BoxGeometry(0.03, 0.04, 0.1);
+                rearSightGeo.translate(-0.4, 0.2, 0);
+                const gasTubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8);
+                gasTubeGeo.rotateZ(Math.PI / 2);
+                gasTubeGeo.translate(0.75, 0.2, 0);
+
+                const metalGeos = BufferGeometryUtils.mergeGeometries([receiverGeo, barrelGeo, magazineGeo, gripGeo, frontSightGeo, rearSightGeo, gasTubeGeo]);
+                const metalMesh = new THREE.Mesh(metalGeos, metalMat);
+                akModel.add(metalMesh);
+
+                // Wood parts
+                const stockGeo = new THREE.BoxGeometry(0.8, 0.2, 0.12);
+                stockGeo.translate(-0.9, -0.05, 0);
+                const stockEndGeo = new THREE.BoxGeometry(0.1, 0.25, 0.12);
+                stockEndGeo.translate(-1.25, -0.05, 0);
+                const handguardGeo = new THREE.BoxGeometry(0.5, 0.2, 0.2);
+                handguardGeo.translate(0.75, 0.05, 0);
+
+                const woodGeos = BufferGeometryUtils.mergeGeometries([stockGeo, stockEndGeo, handguardGeo]);
+                const woodMesh = new THREE.Mesh(woodGeos, woodMat);
+                akModel.add(woodMesh);
+
+                akModel.scale.set(0.6, 0.6, 0.6);
+                itemManager.items[0].model = akModel;
+
+
+                const axeGeo = new THREE.BoxGeometry(0.1, 0.8, 0.1);
+                const axeHeadGeo = new THREE.BoxGeometry(0.2, 0.4, 0.3);
+                axeHeadGeo.translate(0, 0.5, 0);
+                const mergedAxeGeo = BufferGeometryUtils.mergeGeometries([axeGeo, axeHeadGeo]);
+                const axeMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+                itemManager.items[1].model = new THREE.Mesh(mergedAxeGeo, axeMat);
+
+                const c4Geo = new THREE.BoxGeometry(0.5, 0.3, 0.7);
+                const c4Mat = new THREE.MeshStandardMaterial({ color: 0x009900 });
+                itemManager.items[2].model = new THREE.Mesh(c4Geo, c4Mat);
+
+                const jetpackGeo = new THREE.BoxGeometry(0.8, 1.0, 0.3);
+                const jetpackMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+                itemManager.items[3].model = new THREE.Mesh(jetpackGeo, jetpackMat);
+                
+                // Position models for viewmodel
+                itemManager.items[0].model.position.set(0.6, -0.4, -1.2);
+                itemManager.items[0].model.rotation.y = Math.PI;
+
+                itemManager.items[1].model.position.set(0.5, -0.5, -1.0);
+                itemManager.items[1].model.rotation.y = Math.PI;
+                itemManager.items[1].model.rotation.z = Math.PI / 8;
+
+                itemManager.items[2].model.position.set(0.5, -0.4, -1.0);
+                itemManager.items[2].model.rotation.y = Math.PI;
+
+                // Jetpack is not held, so it's not positioned in the view model
+            },
+            updateViewModel: () => {
+                if (!viewModel) return;
+                // Clear previous item
+                while(viewModel.children.length > 0){ 
+                    viewModel.remove(viewModel.children[0]); 
+                }
+                // Add new item if it's not the jetpack
+                const selected = itemManager.items[itemManager.selectedItem];
+                if (selected && selected.name !== 'Jetpack' && selected.model) {
+                    viewModel.add(selected.model.clone());
+                }
+            },
+            updateHotbar: () => {
+                for (let i = 0; i < itemManager.items.length; i++) {
+                    const slot = document.getElementById(`slot-${i}`);
+                    if (slot) {
+                        slot.classList.toggle('selected', i === itemManager.selectedItem);
+                    }
+                }
+            }
+        };
+
         const characterManager = {
             characters: [],
             activeInstances: [],
@@ -520,7 +670,7 @@
                 const spawnRadius = 80;
                 const spawnX = (Math.random() - 0.5) * spawnRadius;
                 const spawnZ = 50 + (Math.random() - 0.5) * spawnRadius;
-                const spawnY = getNoiseHeight(spawnX, spawnZ) + 5; // Add offset from ground
+                const spawnY = getFinalHeight(spawnX, spawnZ) + 5; // Add offset from ground
                 
                 character.position.set(spawnX, spawnY, spawnZ);
                 
@@ -567,7 +717,7 @@
                         instance.object3D.position.y += instance.velocity.y * delta;
                     }
 
-                    const groundHeight = getNoiseHeight(instance.object3D.position.x, instance.object3D.position.z);
+                    const groundHeight = getFinalHeight(instance.object3D.position.x, instance.object3D.position.z);
                     if (instance.object3D.position.y < groundHeight) {
                         instance.object3D.position.y = groundHeight;
                         instance.velocity.y = 0;
@@ -712,6 +862,10 @@
             playerBody.add(camera); 
             scene.add(playerBody);
 
+            // ViewModel for first-person items
+            viewModel = new THREE.Group();
+            camera.add(viewModel);
+
             // --- Sky ---
             sky = new Sky();
             sky.scale.setScalar(450000);
@@ -779,6 +933,16 @@
             const onKeyDown = (e) => {
                 if (isMobile) return;
                 keyState[e.code] = true;
+
+                // Item switching
+                if (e.code.startsWith('Digit')) {
+                    const digit = parseInt(e.code.slice(5)) - 1;
+                    if (digit >= 0 && digit < itemManager.items.length) {
+                        itemManager.selectedItem = digit;
+                        itemManager.updateViewModel();
+                        itemManager.updateHotbar();
+                    }
+                }
             };
 
             const onKeyUp = (e) => {
@@ -787,6 +951,120 @@
             };
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
+
+            window.addEventListener('pointerdown', (event) => {
+                // Check if the game is active and not in creator mode
+                if ((!controls.isLocked && !isMobile) || creator.isOpen) return;
+                // Use primary button for actions (left mouse, touch)
+                if (event.button !== 0 && event.pointerType === 'mouse') return;
+
+                const selectedItem = itemManager.items[itemManager.selectedItem];
+
+                if (selectedItem.name === 'Axe') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    
+                    const treeMeshes = [];
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        // Find the tree InstancedMesh in the chunk
+                        const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                        if (treeMesh) {
+                            treeMeshes.push(treeMesh);
+                        }
+                    }
+
+                    if (treeMeshes.length > 0) {
+                        const intersects = itemActionRaycaster.intersectObjects(treeMeshes);
+
+                        if (intersects.length > 0) {
+                            const intersection = intersects[0];
+                            // Check if the tree is within reach
+                            if (intersection.distance < 15) { 
+                                const hitInstanceId = intersection.instanceId;
+                                const treeMesh = intersection.object;
+                                const treeId = treeMesh.userData.instanceIds[hitInstanceId];
+
+                                if (treeId && !removedTrees.has(treeId)) {
+                                    removedTrees.add(treeId);
+
+                                    // "Remove" the tree by setting its matrix to a scale of 0
+                                    const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                                    treeMesh.setMatrixAt(hitInstanceId, zeroMatrix);
+                                    treeMesh.instanceMatrix.needsUpdate = true;
+
+                                    console.log(`Removed tree: ${treeId}`);
+                                }
+                            }
+                        }
+                    }
+                } else if (selectedItem.name === 'C4') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    
+                    const terrainMeshes = [];
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        const terrainMesh = chunk.children.find(c => c.geometry.type === 'PlaneGeometry' && c.material.vertexColors);
+                        const waterMesh = chunk.children.find(c => c.material === waterMaterial);
+                        if (terrainMesh) terrainMeshes.push(terrainMesh);
+                        if (waterMesh) terrainMeshes.push(waterMesh);
+                    }
+
+                    const intersects = itemActionRaycaster.intersectObjects(terrainMeshes);
+
+                    if (intersects.length > 0) {
+                        const intersection = intersects[0];
+                        if (intersection.distance < 15) {
+                            const c4Model = itemManager.items[2].model.clone();
+                            c4Model.position.copy(intersection.point);
+                            c4Model.rotation.y = Math.random() * Math.PI * 2;
+                            scene.add(c4Model);
+
+                            activeC4s.push({
+                                model: c4Model,
+                                placedTime: performance.now()
+                            });
+                            console.log('C4 placed at', c4Model.position);
+                        }
+                    }
+                } else if (selectedItem.name === 'AK') {
+                    itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    const intersects = itemActionRaycaster.intersectObjects(scene.children, true);
+                    
+                    let endPoint;
+                    if (intersects.length > 0) {
+                        endPoint = intersects[0].point;
+                    } else {
+                        endPoint = new THREE.Vector3();
+                        camera.getWorldDirection(endPoint).multiplyScalar(1000).add(camera.getWorldPosition(new THREE.Vector3()));
+                    }
+
+                    const gunTip = new THREE.Vector3(0.6, -0.4, -2.5); // Local position in viewmodel
+                    gunTip.applyMatrix4(viewModel.matrixWorld);
+
+                    // Tracer line
+                    const tracerGeo = new THREE.BufferGeometry().setFromPoints([gunTip, endPoint]);
+                    const tracerMat = new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
+                    const tracerLine = new THREE.Line(tracerGeo, tracerMat);
+                    tracerLine.userData.startTime = performance.now();
+                    scene.add(tracerLine);
+                    activeBullets.push({ object: tracerLine, type: 'tracer' });
+
+                    // Hit effect
+                    const hitGeo = new THREE.SphereGeometry(0.2, 8, 8);
+                    const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+                    const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+                    hitSphere.position.copy(endPoint);
+                    hitSphere.userData.startTime = performance.now();
+                    scene.add(hitSphere);
+                    activeBullets.push({ object: hitSphere, type: 'hit' });
+
+                    // Muzzle flash
+                    const muzzleFlash = new THREE.PointLight(0xffcc33, 10, 5);
+                    muzzleFlash.position.copy(gunTip);
+                    scene.add(muzzleFlash);
+                    setTimeout(() => scene.remove(muzzleFlash), 50);
+                }
+            });
 
             if (isMobile) {
                 setupMobileControls();
@@ -805,6 +1083,9 @@
             document.body.appendChild(renderer.domElement);
             window.addEventListener('resize', onWindowResize);
 
+            itemManager.init();
+            itemManager.updateViewModel();
+            itemManager.updateHotbar();
             characterManager.loadCharacters();
             initCreator();
         }
@@ -1295,11 +1576,23 @@
             return finalHeight; 
         }
 
+        function getFinalHeight(x, z) {
+            let height = getNoiseHeight(x, z);
+            for (const deform of terrainDeformations) {
+                const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+                if (distance < deform.radius) {
+                    const depression = deform.maxDepth * (1 - (distance / deform.radius));
+                    height += depression;
+                }
+            }
+            return height;
+        }
+
         function getSlope(x, z) {
             const step = 2;
-            const h = getNoiseHeight(x, z);
-            const hx = getNoiseHeight(x + step, z);
-            const hz = getNoiseHeight(x, z + step);
+            const h = getFinalHeight(x, z);
+            const hx = getFinalHeight(x + step, z);
+            const hz = getFinalHeight(x, z + step);
             const dx = (hx - h) / step;
             const dz = (hz - h) / step;
             return Math.sqrt(dx*dx + dz*dz);
@@ -1335,14 +1628,28 @@
             for (let i = 0; i < posAttr.count; i++) {
                 const x = posAttr.getX(i) + (cx * chunkSize);
                 const z = posAttr.getZ(i) + (cz * chunkSize);
-                const y = getNoiseHeight(x, z);
+                const y = getFinalHeight(x, z);
                 posAttr.setY(i, y);
-                if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
-                else if (y < 120) {
-                    const n = perlin.noise(x*0.02, z*0.02, seed);
-                    colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
-                } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
-                else colors.push(0.96, 0.98, 1.0); 
+
+                let inCrater = false;
+                for (const deform of terrainDeformations) {
+                    const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+                    if (distance < deform.radius) {
+                        inCrater = true;
+                        break;
+                    }
+                }
+
+                if (inCrater) {
+                    colors.push(0.2, 0.2, 0.2); // Scorched earth color
+                } else {
+                    if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
+                    else if (y < 120) {
+                        const n = perlin.noise(x*0.02, z*0.02, seed);
+                        colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
+                    } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
+                    else colors.push(0.96, 0.98, 1.0);
+                }
             }
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
             geometry.computeVertexNormals();
@@ -1359,12 +1666,16 @@
             const treeCount = 60; 
             const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
             treeMesh.castShadow = true; treeMesh.receiveShadow = true;
+            treeMesh.userData.instanceIds = {}; // Initialize once before the loop
             const dummy = new THREE.Object3D();
             let tIdx = 0;
             for (let i = 0; i < treeCount; i++) {
+                const treeId = `${cx},${cz},${i}`;
+                if (removedTrees.has(treeId)) continue;
+
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
                 const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
                 if (h > waterLevel + 4 && slope < 1.2 && h < 250 && Math.random() > 0.4) {
                     dummy.position.set(rx, h, rz);
@@ -1372,7 +1683,9 @@
                     dummy.scale.set(s, s, s);
                     dummy.rotation.y = Math.random() * Math.PI * 2;
                     dummy.updateMatrix();
-                    treeMesh.setMatrixAt(tIdx++, dummy.matrix);
+                    treeMesh.setMatrixAt(tIdx, dummy.matrix);
+                    treeMesh.userData.instanceIds[tIdx] = treeId;
+                    tIdx++;
                 }
             }
             treeMesh.count = tIdx; 
@@ -1385,7 +1698,7 @@
             for (let i = 0; i < grassCount; i++) {
                 const rx = (Math.random() - 0.5) * chunkSize;
                 const rz = (Math.random() - 0.5) * chunkSize;
-                const h = getNoiseHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+                const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
                 const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
                 if (h > waterLevel + 2 && h < 250 && slope < 0.8) {
                     dummy.position.set(rx, h, rz);
@@ -1410,6 +1723,212 @@
         }
 
         function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+
+        function deformTerrain(position) {
+            const radius = 45;
+            const maxDepth = -15;
+
+            // Store the deformation data for persistence, ensuring it's available for future chunk loads.
+            terrainDeformations.push({ position: position.clone(), radius, maxDepth });
+
+            // Define the bounding box of the explosion's area of effect.
+            const minX = position.x - radius;
+            const maxX = position.x + radius;
+            const minZ = position.z - radius;
+            const maxZ = position.z + radius;
+
+            // Determine the range of chunks that overlap with the bounding box.
+            const startChunkX = Math.floor(minX / chunkSize);
+            const endChunkX = Math.floor(maxX / chunkSize);
+            const startChunkZ = Math.floor(minZ / chunkSize);
+            const endChunkZ = Math.floor(maxZ / chunkSize);
+
+            const affectedChunkKeys = new Set();
+
+            // Iterate through all chunk coordinates within the calculated range.
+            for (let cx = startChunkX; cx <= endChunkX; cx++) {
+                for (let cz = startChunkZ; cz <= endChunkZ; cz++) {
+                    const key = `${cx},${cz}`;
+                    // Only process chunks that are currently loaded in the scene.
+                    // Chunks loaded later will correctly apply the deformation from the start.
+                    if (chunks[key]) {
+                        affectedChunkKeys.add(key);
+                    }
+                }
+            }
+
+            // Regenerate all identified chunks.
+            affectedChunkKeys.forEach(key => {
+                const chunkGroup = chunks[key];
+                if (chunkGroup) {
+                    // Properly dispose of the old chunk's resources to prevent memory leaks.
+                    chunkGroup.traverse(child => {
+                        if (child.isMesh || child.isInstancedMesh) {
+                            if(child.geometry) child.geometry.dispose();
+                            if(child.material) child.material.dispose(); // Dispose materials as well
+                        }
+                    });
+                    scene.remove(chunkGroup);
+                    delete chunks[key]; // Remove the reference from our tracking object.
+                    
+                    // Re-create the chunk using its coordinates.
+                    const coords = key.split(',');
+                    const cx = parseInt(coords[0], 10);
+                    const cz = parseInt(coords[1], 10);
+                    createChunk(cx, cz);
+                }
+            });
+        }
+
+        function updateC4(time, delta) {
+            for (let i = activeC4s.length - 1; i >= 0; i--) {
+                const c4 = activeC4s[i];
+                const elapsedTime = (time - c4.placedTime) / 1000;
+
+                if (elapsedTime > 3) { // Detonate after 3 seconds
+                    // Create explosion particles
+                    createExplosionParticles(c4.model.position);
+                    
+                    // Add flash of light
+                    const explosionLight = new THREE.PointLight(0xffffff, 100, 200);
+                    explosionLight.position.copy(c4.model.position);
+                    scene.add(explosionLight);
+                    setTimeout(() => scene.remove(explosionLight), 200);
+
+                    // Apply force to player if nearby
+                    const distanceToPlayer = playerBody.position.distanceTo(c4.model.position);
+                    if (distanceToPlayer < 80) { // Increased blast radius for force
+                        const blastDirection = new THREE.Vector3().subVectors(playerBody.position, c4.model.position).normalize();
+                        const blastForce = (1.0 - (distanceToPlayer / 80)) * 4000;
+                        velocity.add(blastDirection.multiplyScalar(blastForce));
+                        
+                        // Set camera shake based on distance
+                        cameraShake.time = 0.8; // duration
+                        cameraShake.intensity = (1.0 - (distanceToPlayer / 80)) * 0.4;
+                    }
+
+                    // Deform terrain and destroy trees
+                    deformTerrain(c4.model.position);
+                    const explosionRadius = 60; // Increased radius
+                    for (const key in chunks) {
+                        const chunk = chunks[key];
+                        const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                        if (treeMesh) {
+                            const dummy = new THREE.Object3D();
+                            let needsUpdate = false;
+                            for (let i = 0; i < treeMesh.count; i++) {
+                                const treeId = treeMesh.userData.instanceIds[i];
+                                if (!treeId || removedTrees.has(treeId)) continue;
+                                
+                                treeMesh.getMatrixAt(i, dummy.matrix);
+                                const treePosition = new THREE.Vector3().setFromMatrixPosition(dummy.matrix);
+                                treePosition.add(treeMesh.position);
+
+                                if (treePosition.distanceTo(c4.model.position) < explosionRadius) {
+                                    removedTrees.add(treeId);
+                                    const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                                    treeMesh.setMatrixAt(i, zeroMatrix);
+                                    needsUpdate = true;
+                                }
+                            }
+                            if (needsUpdate) {
+                                treeMesh.instanceMatrix.needsUpdate = true;
+                            }
+                        }
+                    }
+
+
+                    // Remove C4 from scene and array
+                    scene.remove(c4.model);
+                    activeC4s.splice(i, 1);
+                }
+            }
+        }
+
+        let explosionParticles = [];
+        function createExplosionParticles(position) {
+            // --- Fireball ---
+            const fireCount = 150;
+            const fireGeo = new THREE.BufferGeometry();
+            const firePos = new Float32Array(fireCount * 3);
+            const fireVel = new Float32Array(fireCount * 3);
+            const fireColors = new Float32Array(fireCount * 3);
+
+            for (let i = 0; i < fireCount; i++) {
+                const phi = Math.acos(-1 + (2 * i) / fireCount);
+                const theta = Math.sqrt(fireCount * Math.PI) * phi;
+                const x = Math.cos(theta) * Math.sin(phi);
+                const y = Math.sin(theta) * Math.sin(phi);
+                const z = Math.cos(phi);
+
+                const speed = 20 + Math.random() * 30;
+
+                firePos[i * 3 + 0] = position.x;
+                firePos[i * 3 + 1] = position.y;
+                firePos[i * 3 + 2] = position.z;
+
+                fireVel[i * 3 + 0] = x * speed;
+                fireVel[i * 3 + 1] = y * speed * 0.8; // Slightly less vertical
+                fireVel[i * 3 + 2] = z * speed;
+                
+                const color = new THREE.Color();
+                color.setHSL(0.1 * Math.random(), 1.0, 0.5);
+                fireColors[i * 3 + 0] = color.r;
+                fireColors[i * 3 + 1] = color.g;
+                fireColors[i * 3 + 2] = color.b;
+            }
+            fireGeo.setAttribute('position', new THREE.BufferAttribute(firePos, 3));
+            fireGeo.setAttribute('velocity', new THREE.BufferAttribute(fireVel, 3));
+            fireGeo.setAttribute('color', new THREE.BufferAttribute(fireColors, 3));
+            
+            const fireMat = new THREE.PointsMaterial({
+                vertexColors: true,
+                size: 3.0,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            const fireball = new THREE.Points(fireGeo, fireMat);
+            fireball.userData = { startTime: performance.now(), type: 'fire', duration: 0.8 };
+            scene.add(fireball);
+            explosionParticles.push(fireball);
+
+            // --- Smoke ---
+            const smokeCount = 250;
+            const smokeGeo = new THREE.BufferGeometry();
+            const smokePos = new Float32Array(smokeCount * 3);
+            const smokeVel = new Float32Array(smokeCount * 3);
+
+            for (let i = 0; i < smokeCount; i++) {
+                const x = (Math.random() - 0.5) * 2;
+                const y = Math.random();
+                const z = (Math.random() - 0.5) * 2;
+                const dir = new THREE.Vector3(x, y, z).normalize();
+
+                const speed = 10 + Math.random() * 20;
+
+                smokePos[i * 3 + 0] = position.x + (Math.random()-0.5) * 5;
+                smokePos[i * 3 + 1] = position.y + (Math.random()-0.5) * 5;
+                smokePos[i * 3 + 2] = position.z + (Math.random()-0.5) * 5;
+
+                smokeVel[i * 3 + 0] = dir.x * speed;
+                smokeVel[i * 3 + 1] = dir.y * speed + 10; // Bias upwards
+                smokeVel[i * 3 + 2] = dir.z * speed;
+            }
+            smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3));
+            smokeGeo.setAttribute('velocity', new THREE.BufferAttribute(smokeVel, 3));
+
+            const smokeMat = new THREE.PointsMaterial({
+                color: 0x333333,
+                size: 8.0,
+                transparent: true,
+                depthWrite: false
+            });
+            const smoke = new THREE.Points(smokeGeo, smokeMat);
+            smoke.userData = { startTime: performance.now(), type: 'smoke', duration: 3.5 };
+            scene.add(smoke);
+            explosionParticles.push(smoke);
+        }
 
         function handleGamepadInput() {
             if (!gamepadConnected) return; 
@@ -1482,6 +2001,59 @@
             }
 
             if (gameActive) {
+                updateC4(time, delta);
+
+                // Update bullet effects
+                for (let i = activeBullets.length - 1; i >= 0; i--) {
+                    const bullet = activeBullets[i];
+                    const elapsedTime = (time - bullet.object.userData.startTime) / 1000;
+                    let duration = bullet.type === 'tracer' ? 0.1 : 0.3;
+
+                    if (elapsedTime > duration) {
+                        scene.remove(bullet.object);
+                        if (bullet.object.geometry) bullet.object.geometry.dispose();
+                        if (bullet.object.material) bullet.object.material.dispose();
+                        activeBullets.splice(i, 1);
+                    } else {
+                        bullet.object.material.opacity = 1.0 - (elapsedTime / duration);
+                    }
+                }
+
+
+                // Update explosion particles
+                for (let i = explosionParticles.length - 1; i >= 0; i--) {
+                    const particleSystem = explosionParticles[i];
+                    const elapsedTime = (time - particleSystem.userData.startTime) / 1000;
+                    const duration = particleSystem.userData.duration;
+
+                    if (elapsedTime > duration) {
+                        scene.remove(particleSystem);
+                        particleSystem.geometry.dispose();
+                        particleSystem.material.dispose();
+                        explosionParticles.splice(i, 1);
+                        continue;
+                    }
+
+                    const positions = particleSystem.geometry.attributes.position;
+                    const velocities = particleSystem.geometry.attributes.velocity;
+                    
+                    for (let j = 0; j < positions.count; j++) {
+                        positions.setX(j, positions.getX(j) + velocities.getX(j) * delta);
+                        positions.setY(j, positions.getY(j) + velocities.getY(j) * delta);
+                        positions.setZ(j, positions.getZ(j) + velocities.getZ(j) * delta);
+                        
+                        if (particleSystem.userData.type === 'fire') {
+                            velocities.setY(j, velocities.getY(j) - 9.8 * delta * 3.0); // Gravity on fire
+                        } else { // smoke
+                            velocities.setX(j, velocities.getX(j) * (1.0 - delta * 0.2)); // Air drag
+                            velocities.setZ(j, velocities.getZ(j) * (1.0 - delta * 0.2));
+                            velocities.setY(j, velocities.getY(j) * (1.0 - delta * 0.1));
+                        }
+                    }
+                    positions.needsUpdate = true;
+                    particleSystem.material.opacity = 1.0 - (elapsedTime / duration);
+                }
+
                 characterManager.update(delta, time);
                 updateChunks();
                 const body = playerBody;
@@ -1490,6 +2062,12 @@
                 velocity.x -= velocity.x * dampingX * delta;
                 velocity.z -= velocity.z * dampingZ * delta;
                 velocity.y -= 9.8 * 60.0 * delta; 
+
+                // Jetpack logic
+                const selectedItem = itemManager.items[itemManager.selectedItem];
+                if (selectedItem && selectedItem.name === 'Jetpack' && keyState['Space']) {
+                    velocity.y += 9.8 * 90.0 * delta; // Apply upward force to counteract gravity and ascend
+                }
 
                 // --- 移動方向の決定 ---
                 if (isMobile && activeTouch.joystick !== null) {
@@ -1554,7 +2132,7 @@
                 
                 body.position.y += (velocity.y * delta); 
 
-                const groundHeight = getNoiseHeight(body.position.x, body.position.z);
+                const groundHeight = getFinalHeight(body.position.x, body.position.z);
                 
                 if (body.position.y < groundHeight + standingEyeHeight) {
                     if (!canJump) { 
@@ -1612,6 +2190,15 @@
 
                 camera.position.y = standingEyeHeight + camOffset.y + landingAnimOffsetHeight;
                 camera.position.x = camOffset.x;
+
+                // Apply camera shake
+                if (cameraShake.time > 0) {
+                    cameraShake.time -= delta;
+                    const shakeAmount = cameraShake.intensity * Math.sin(cameraShake.time * 50);
+                    camera.position.x += shakeAmount;
+                    camera.position.y += shakeAmount;
+                }
+
                 camera.rotation.z = targetTiltAngle; 
                 camera.rotation.x += landingAnimRotationX; 
                 
