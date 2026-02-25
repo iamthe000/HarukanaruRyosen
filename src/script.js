@@ -1,0 +1,1772 @@
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+
+// --- グローバル変数 ---
+let camera, scene, renderer, controls;
+let playerBody; 
+let blocker;
+let sky, sun;
+const itemActionRaycaster = new THREE.Raycaster();
+const activeC4s = [];
+const activeBullets = [];
+
+const velocity = new THREE.Vector3();
+const direction = new THREE.Vector3();
+
+let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+let isSprinting = false;
+let canJump = false;
+
+let prevTime = performance.now();
+
+// --- アクション・カメラ設定 ---
+let walkCycle = 0;
+const camOffset = { x: 0, y: 0 };
+let cameraShake = { time: 0, intensity: 0 };
+
+let isLandingAnimActive = false;
+let landingAnimStartTime = 0;
+const landingAnimDuration = 0.65;
+const landingAnimThreshold = 280;
+let targetTiltAngle = 0;
+let landingAnimRotationX = 0; 
+
+const baseFov = 100;
+const standingEyeHeight = 10;
+
+// --- 地形設定 ---
+const chunkSize = 400; 
+const chunkRes = 40; 
+const renderDistance = 3; 
+const waterLevel = 22; 
+const chunks = {};
+const removedTrees = new Set();
+const terrainDeformations = [];
+const perlin = new ImprovedNoise();
+const seed = Math.random() * 100;
+
+// --- 盆地生成パラメータ ---
+const BASIN_FLAT_RADIUS = 550;   
+const BASIN_WALL_START = 550;    
+const BASIN_PEAK_DIST = 1100;    
+const BASIN_WALL_END = 1600;     
+const WALL_HEIGHT = 500;         
+
+let treeGeometry, treeMaterial;
+let grassGeometry, grassMaterial;
+let waterGeometry, waterMaterial;
+
+const speedLines = document.getElementById('speed-lines');
+
+const skyUniforms = {
+    turbidity: 8,
+    rayleigh: 2,
+    mieCoefficient: 0.005,
+    mieDirectionalG: 0.8,
+    elevation: 25,
+    azimuth: 180,
+    exposure: 0.6
+};
+
+const FOG_COLOR = 0xcce0ff; 
+
+let isMobile = false;
+let activeTouch = { joystick: null, camera: null }; 
+// モバイル入力用の正規化ベクトル (-1.0 ~ 1.0)
+let joystickInput = { x: 0, y: 0 }; 
+let mobileDashMode = false;
+
+let gamepadConnected = false;
+const keyState = {}; 
+
+const SENSITIVITY_MULTIPLIER = 10; 
+
+// --- Character Creator ---
+let creator = {
+    isOpen: false,
+    scene: null,
+    camera: null,
+    renderer: null,
+    controls: null,
+    voxels: [],
+    gridHelper: null,
+    selectedColor: 0x00ff00,
+    raycaster: new THREE.Raycaster(),
+    pointer: new THREE.Vector2(),
+    voxelMaterial: new THREE.MeshStandardMaterial({}),
+    voxelGeometry: new THREE.BoxGeometry(1, 1, 1),
+    editMode: 'add', // 'add' or 'remove'
+};
+
+// --- Item Management ---
+let viewModel;
+const itemManager = {
+    items: [
+        { name: 'AK', model: null },
+        { name: 'Axe', model: null },
+        { name: 'C4', model: null },
+        { name: 'Jetpack', model: null }
+    ],
+    selectedItem: 0, // index of the selected item
+    init: () => {
+        // Create placeholder models
+        const akModel = new THREE.Group();
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x282828, roughness: 0.6 });
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x693f23, roughness: 0.8 });
+
+        // Metal parts
+        const receiverGeo = new THREE.BoxGeometry(1.0, 0.25, 0.15);
+        const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8);
+        barrelGeo.rotateZ(Math.PI / 2);
+        barrelGeo.translate(0.95, 0.08, 0);
+        const magazineGeo = new THREE.BoxGeometry(0.12, 0.5, 0.12);
+        magazineGeo.translate(0.2, -0.25, 0);
+        const gripGeo = new THREE.BoxGeometry(0.1, 0.4, 0.12);
+        gripGeo.rotateZ(-0.2);
+        gripGeo.translate(-0.15, -0.25, 0);
+        const frontSightGeo = new THREE.BoxGeometry(0.02, 0.08, 0.02);
+        frontSightGeo.translate(1.3, 0.12, 0);
+        const rearSightGeo = new THREE.BoxGeometry(0.03, 0.04, 0.1);
+        rearSightGeo.translate(-0.4, 0.2, 0);
+        const gasTubeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8);
+        gasTubeGeo.rotateZ(Math.PI / 2);
+        gasTubeGeo.translate(0.75, 0.2, 0);
+
+        const metalGeos = BufferGeometryUtils.mergeGeometries([receiverGeo, barrelGeo, magazineGeo, gripGeo, frontSightGeo, rearSightGeo, gasTubeGeo]);
+        const metalMesh = new THREE.Mesh(metalGeos, metalMat);
+        akModel.add(metalMesh);
+
+        // Wood parts
+        const stockGeo = new THREE.BoxGeometry(0.8, 0.2, 0.12);
+        stockGeo.translate(-0.9, -0.05, 0);
+        const stockEndGeo = new THREE.BoxGeometry(0.1, 0.25, 0.12);
+        stockEndGeo.translate(-1.25, -0.05, 0);
+        const handguardGeo = new THREE.BoxGeometry(0.5, 0.2, 0.2);
+        handguardGeo.translate(0.75, 0.05, 0);
+
+        const woodGeos = BufferGeometryUtils.mergeGeometries([stockGeo, stockEndGeo, handguardGeo]);
+        const woodMesh = new THREE.Mesh(woodGeos, woodMat);
+        akModel.add(woodMesh);
+
+        akModel.scale.set(0.6, 0.6, 0.6);
+        itemManager.items[0].model = akModel;
+
+
+        const axeGeo = new THREE.BoxGeometry(0.1, 0.8, 0.1);
+        const axeHeadGeo = new THREE.BoxGeometry(0.2, 0.4, 0.3);
+        axeHeadGeo.translate(0, 0.5, 0);
+        const mergedAxeGeo = BufferGeometryUtils.mergeGeometries([axeGeo, axeHeadGeo]);
+        const axeMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+        itemManager.items[1].model = new THREE.Mesh(mergedAxeGeo, axeMat);
+
+        const c4Geo = new THREE.BoxGeometry(0.5, 0.3, 0.7);
+        const c4Mat = new THREE.MeshStandardMaterial({ color: 0x009900 });
+        itemManager.items[2].model = new THREE.Mesh(c4Geo, c4Mat);
+
+        const jetpackGeo = new THREE.BoxGeometry(0.8, 1.0, 0.3);
+        const jetpackMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+        itemManager.items[3].model = new THREE.Mesh(jetpackGeo, jetpackMat);
+
+        // Position models for viewmodel
+        itemManager.items[0].model.position.set(0.6, -0.4, -1.2);
+        itemManager.items[0].model.rotation.y = Math.PI;
+
+        itemManager.items[1].model.position.set(0.5, -0.5, -1.0);
+        itemManager.items[1].model.rotation.y = Math.PI;
+        itemManager.items[1].model.rotation.z = Math.PI / 8;
+
+        itemManager.items[2].model.position.set(0.5, -0.4, -1.0);
+        itemManager.items[2].model.rotation.y = Math.PI;
+
+        // Jetpack is not held, so it's not positioned in the view model
+    },
+    updateViewModel: () => {
+        if (!viewModel) return;
+        // Clear previous item
+        while(viewModel.children.length > 0){ 
+            viewModel.remove(viewModel.children[0]); 
+        }
+        // Add new item if it's not the jetpack
+        const selected = itemManager.items[itemManager.selectedItem];
+        if (selected && selected.name !== 'Jetpack' && selected.model) {
+            viewModel.add(selected.model.clone());
+        }
+    },
+    updateHotbar: () => {
+        for (let i = 0; i < itemManager.items.length; i++) {
+            const slot = document.getElementById(`slot-${i}`);
+            if (slot) {
+                slot.classList.toggle('selected', i === itemManager.selectedItem);
+            }
+        }
+    }
+};
+
+const characterManager = {
+    characters: [],
+    activeInstances: [],
+
+    spawnCharacter: (characterData) => {
+        const character = new THREE.Group();
+
+        // Find the center of the character model
+        const center = new THREE.Vector3();
+        if (characterData.voxels.length > 0) {
+            characterData.voxels.forEach(v => center.add(new THREE.Vector3(v.x, v.y, v.z)));
+            center.divideScalar(characterData.voxels.length);
+        }
+
+        characterData.voxels.forEach(v => {
+            const mat = new THREE.MeshStandardMaterial({ color: v.color, roughness: 0.8, flatShading: true });
+            const mesh = new THREE.Mesh(creator.voxelGeometry, mat);
+            mesh.position.set(v.x - center.x, v.y - center.y, v.z - center.z);
+            character.add(mesh);
+        });
+
+        const spawnRadius = 80;
+        const spawnX = (Math.random() - 0.5) * spawnRadius;
+        const spawnZ = 50 + (Math.random() - 0.5) * spawnRadius;
+        const spawnY = getFinalHeight(spawnX, spawnZ) + 5; // Add offset from ground
+
+        character.position.set(spawnX, spawnY, spawnZ);
+
+        const instance = {
+            object3D: character,
+            data: characterData,
+            born: performance.now(),
+            lastAction: 0,
+            velocity: new THREE.Vector3()
+        };
+
+        characterManager.activeInstances.push(instance);
+        scene.add(character);
+    },
+
+    update: (delta, time) => {
+        const MAX_INSTANCES = 50; // Performance limit
+        const now = performance.now();
+
+        // 1. Update existing instances (movement, lifespan, reproduction)
+        for (let i = characterManager.activeInstances.length - 1; i >= 0; i--) {
+            const instance = characterManager.activeInstances[i];
+            const age = (now - instance.born) / 1000;
+
+            // --- Lifespan Check ---
+            if (age > instance.data.lifespan) {
+                scene.remove(instance.object3D);
+                // Basic cleanup
+                instance.object3D.traverse(child => {
+                    if (child.isMesh) {
+                        child.geometry.dispose();
+                        child.material.dispose();
+                    }
+                });
+                characterManager.activeInstances.splice(i, 1);
+                continue;
+            }
+
+            // --- Movement ---
+            instance.velocity.y -= 9.8 * 2.0 * delta; // Apply gravity regardless of movement type
+            if (instance.data.moveMethod === 'random_walk') {
+                instance.object3D.position.add(instance.velocity.clone().multiplyScalar(delta));
+            } else { // 'still' or other types only move vertically due to gravity
+                instance.object3D.position.y += instance.velocity.y * delta;
+            }
+
+            const groundHeight = getFinalHeight(instance.object3D.position.x, instance.object3D.position.z);
+            if (instance.object3D.position.y < groundHeight) {
+                instance.object3D.position.y = groundHeight;
+                instance.velocity.y = 0;
+                if (instance.data.moveMethod === 'random_walk') {
+                    instance.velocity.x *= 0.9; // Friction
+                    instance.velocity.z *= 0.9;
+                }
+            }
+
+            // --- Behavior (Reproduction & Movement decisions) ---
+            if (now - instance.lastAction > 3000 + Math.random() * 4000) { // Every 3-7 seconds
+                instance.lastAction = now;
+
+                // --- Reproduction Logic ---
+                if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                    if (instance.data.reproduction === 'asexual') {
+                        for (let j = 0; j < instance.data.reproCount; j++) {
+                            if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                characterManager.spawnCharacter(instance.data);
+                            }
+                        }
+                    } else if (instance.data.reproduction === 'sexual') {
+                        // Find a potential partner of the same species
+                        const partners = characterManager.activeInstances.filter(p =>
+                            p !== instance && p.data.name === instance.data.name
+                        );
+                        if (partners.length > 0) {
+                            const partner = partners[Math.floor(Math.random() * partners.length)];
+                            // Check if they are close enough to reproduce
+                            if (instance.object3D.position.distanceTo(partner.object3D.position) < 20) {
+                                 for (let j = 0; j < instance.data.reproCount; j++) {
+                                    if (characterManager.activeInstances.length < MAX_INSTANCES) {
+                                        characterManager.spawnCharacter(instance.data);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- Movement Direction Change ---
+                if (instance.data.moveMethod === 'random_walk') {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = instance.data.speed * 10;
+                    instance.velocity.x = Math.cos(angle) * speed;
+                    instance.velocity.z = Math.sin(angle) * speed;
+                    if (Math.random() > 0.5) instance.velocity.y = Math.random() * 5; // Little hop
+                }
+            }
+        }
+
+        // 2. Spawn new "infinite" characters from source
+        characterManager.characters.forEach(charData => {
+            if (charData.reproduction === 'none' && characterManager.activeInstances.length < MAX_INSTANCES) {
+                if (!charData.lastSpawn || (now - charData.lastSpawn > 10000)) { // Spawn every 10 seconds
+                    charData.lastSpawn = now;
+                    characterManager.spawnCharacter(charData);
+                }
+            }
+        });
+    },
+
+    saveCharacter: () => {
+        const name = document.getElementById('char-name').value;
+        if (!name.trim()) {
+            alert('キャラクター名を入力してください。');
+            return;
+        }
+        if (creator.voxels.length === 0) {
+            alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+            return;
+        }
+
+        const voxelData = creator.voxels.map(v => ({
+            x: v.position.x,
+            y: v.position.y,
+            z: v.position.z,
+            color: v.material.color.getHex()
+        }));
+
+        const newChar = {
+            name: name,
+            speed: parseFloat(document.getElementById('char-speed').value),
+            lifespan: parseInt(document.getElementById('char-lifespan').value),
+            reproduction: document.getElementById('repro-type').value,
+            reproCount: parseInt(document.getElementById('repro-count').value),
+            moveMethod: document.getElementById('move-method').value,
+            voxels: voxelData
+        };
+
+        characterManager.characters.push(newChar);
+        localStorage.setItem('voxelGameCharacters', JSON.stringify(characterManager.characters));
+
+        characterManager.spawnCharacter(newChar);
+
+        alert(`キャラクター「${name}」が保存されました！`);
+
+        // Reset creator
+        document.getElementById('char-name').value = '';
+        creator.voxels.forEach(v => creator.scene.remove(v));
+        creator.voxels = [];
+        document.getElementById('close-creator-button').click();
+    },
+
+    loadCharacters: () => {
+        const data = localStorage.getItem('voxelGameCharacters');
+        if (data) {
+            characterManager.characters = JSON.parse(data);
+            console.log(`${characterManager.characters.length} characters loaded.`);
+        }
+    }
+};
+
+init();
+animate();
+
+window.addEventListener("gamepadconnected", (event) => {
+    console.log("Gamepad connected:", event.gamepad.id);
+    gamepadConnected = true;
+});
+
+window.addEventListener("gamepaddisconnected", (event) => {
+    console.log("Gamepad disconnected:", event.gamepad.id);
+    gamepadConnected = false;
+});
+
+function init() {
+    blocker = document.getElementById('blocker');
+    const instructions = document.getElementById('instructions');
+    const mobileControls = document.getElementById('mobile-controls');
+
+    isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(FOG_COLOR, 0.0010); 
+    scene.background = new THREE.Color(FOG_COLOR);
+
+    camera = new THREE.PerspectiveCamera(baseFov, window.innerWidth / window.innerHeight, 0.1, 8000);
+
+    playerBody = new THREE.Object3D();
+    playerBody.position.set(0, 100, 50); 
+    playerBody.add(camera); 
+    scene.add(playerBody);
+
+    // ViewModel for first-person items
+    viewModel = new THREE.Group();
+    camera.add(viewModel);
+
+    // --- Sky ---
+    sky = new Sky();
+    sky.scale.setScalar(450000);
+    scene.add(sky);
+
+    sun = new THREE.Vector3();
+
+    const effectController = skyUniforms;
+
+    const uniforms = sky.material.uniforms;
+    uniforms[ 'turbidity' ].value = effectController.turbidity;
+    uniforms[ 'rayleigh' ].value = effectController.rayleigh;
+    uniforms[ 'mieCoefficient' ].value = effectController.mieCoefficient;
+    uniforms[ 'mieDirectionalG' ].value = effectController.mieDirectionalG;
+
+    const phi = THREE.MathUtils.degToRad( 90 - effectController.elevation );
+    const theta = THREE.MathUtils.degToRad( effectController.azimuth );
+    sun.setFromSphericalCoords( 1, phi, theta );
+    uniforms[ 'sunPosition' ].value.copy( sun );
+
+    // --- Lighting ---
+    const dirLight = new THREE.DirectionalLight(0xfffaed, 1.5); 
+    dirLight.position.set(sun.x * 1000, sun.y * 1000, sun.z * 1000);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 4096;
+    dirLight.shadow.mapSize.height = 4096;
+    const d = 2500; 
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.camera.far = 6000;
+    dirLight.shadow.bias = -0.0001;
+    dirLight.shadow.radius = 2; 
+    scene.add(dirLight);
+
+    const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x6655aa, 0.85); 
+    hemiLight.position.set(0, 500, 0);
+    scene.add(hemiLight);
+
+    // --- Controls ---
+    controls = new PointerLockControls(playerBody, document.body);
+    controls.minPolarAngle = 0.05; 
+    controls.maxPolarAngle = Math.PI - 0.05;
+
+    function startExperience() {
+        instructions.style.display = 'none';
+        blocker.style.display = 'none';
+        if (isMobile) {
+            mobileControls.style.display = 'block';
+        } else {
+            controls.lock();
+        }
+    }
+
+    blocker.addEventListener('click', startExperience);
+    blocker.addEventListener('touchstart', startExperience);
+
+    controls.addEventListener('unlock', () => {
+        blocker.style.display = 'block';
+        instructions.style.display = 'flex';
+         if (isMobile) mobileControls.style.display = 'none';
+    });
+
+    const onKeyDown = (e) => {
+        if (isMobile) return;
+        keyState[e.code] = true;
+
+        // Item switching
+        if (e.code.startsWith('Digit')) {
+            const digit = parseInt(e.code.slice(5)) - 1;
+            if (digit >= 0 && digit < itemManager.items.length) {
+                itemManager.selectedItem = digit;
+                itemManager.updateViewModel();
+                itemManager.updateHotbar();
+            }
+        }
+    };
+
+    const onKeyUp = (e) => {
+        if (isMobile) return;
+        keyState[e.code] = false;
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+
+    window.addEventListener('pointerdown', (event) => {
+        // Check if the game is active and not in creator mode
+        if ((!controls.isLocked && !isMobile) || creator.isOpen) return;
+        // Use primary button for actions (left mouse, touch)
+        if (event.button !== 0 && event.pointerType === 'mouse') return;
+
+        const selectedItem = itemManager.items[itemManager.selectedItem];
+
+        if (selectedItem.name === 'Axe') {
+            itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            const treeMeshes = [];
+            for (const key in chunks) {
+                const chunk = chunks[key];
+                // Find the tree InstancedMesh in the chunk
+                const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                if (treeMesh) {
+                    treeMeshes.push(treeMesh);
+                }
+            }
+
+            if (treeMeshes.length > 0) {
+                const intersects = itemActionRaycaster.intersectObjects(treeMeshes);
+
+                if (intersects.length > 0) {
+                    const intersection = intersects[0];
+                    // Check if the tree is within reach
+                    if (intersection.distance < 15) { 
+                        const hitInstanceId = intersection.instanceId;
+                        const treeMesh = intersection.object;
+                        const treeId = treeMesh.userData.instanceIds[hitInstanceId];
+
+                        if (treeId && !removedTrees.has(treeId)) {
+                            removedTrees.add(treeId);
+
+                            // "Remove" the tree by setting its matrix to a scale of 0
+                            const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                            treeMesh.setMatrixAt(hitInstanceId, zeroMatrix);
+                            treeMesh.instanceMatrix.needsUpdate = true;
+
+                            console.log(`Removed tree: ${treeId}`);
+                        }
+                    }
+                }
+            }
+        } else if (selectedItem.name === 'C4') {
+            itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            const terrainMeshes = [];
+            for (const key in chunks) {
+                const chunk = chunks[key];
+                const terrainMesh = chunk.children.find(c => c.geometry.type === 'PlaneGeometry' && c.material.vertexColors);
+                const waterMesh = chunk.children.find(c => c.material === waterMaterial);
+                if (terrainMesh) terrainMeshes.push(terrainMesh);
+                if (waterMesh) terrainMeshes.push(waterMesh);
+            }
+
+            const intersects = itemActionRaycaster.intersectObjects(terrainMeshes);
+
+            if (intersects.length > 0) {
+                const intersection = intersects[0];
+                if (intersection.distance < 15) {
+                    const c4Model = itemManager.items[2].model.clone();
+                    c4Model.position.copy(intersection.point);
+                    c4Model.rotation.y = Math.random() * Math.PI * 2;
+                    scene.add(c4Model);
+
+                    activeC4s.push({
+                        model: c4Model,
+                        placedTime: performance.now()
+                    });
+                    console.log('C4 placed at', c4Model.position);
+                }
+            }
+        } else if (selectedItem.name === 'AK') {
+            itemActionRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = itemActionRaycaster.intersectObjects(scene.children, true);
+
+            let endPoint;
+            if (intersects.length > 0) {
+                endPoint = intersects[0].point;
+            } else {
+                endPoint = new THREE.Vector3();
+                camera.getWorldDirection(endPoint).multiplyScalar(1000).add(camera.getWorldPosition(new THREE.Vector3()));
+            }
+
+            const gunTip = new THREE.Vector3(0.6, -0.4, -2.5); // Local position in viewmodel
+            gunTip.applyMatrix4(viewModel.matrixWorld);
+
+            // Tracer line
+            const tracerGeo = new THREE.BufferGeometry().setFromPoints([gunTip, endPoint]);
+            const tracerMat = new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
+            const tracerLine = new THREE.Line(tracerGeo, tracerMat);
+            tracerLine.userData.startTime = performance.now();
+            scene.add(tracerLine);
+            activeBullets.push({ object: tracerLine, type: 'tracer' });
+
+            // Hit effect
+            const hitGeo = new THREE.SphereGeometry(0.2, 8, 8);
+            const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+            const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+            hitSphere.position.copy(endPoint);
+            hitSphere.userData.startTime = performance.now();
+            scene.add(hitSphere);
+            activeBullets.push({ object: hitSphere, type: 'hit' });
+
+            // Muzzle flash
+            const muzzleFlash = new THREE.PointLight(0xffcc33, 10, 5);
+            muzzleFlash.position.copy(gunTip);
+            scene.add(muzzleFlash);
+            setTimeout(() => scene.remove(muzzleFlash), 50);
+        }
+    });
+
+    if (isMobile) {
+        setupMobileControls();
+    }
+
+    prepareAssets();
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+    renderer.toneMapping = THREE.CineonToneMapping; 
+    renderer.toneMappingExposure = 0.9; 
+
+    document.body.appendChild(renderer.domElement);
+    window.addEventListener('resize', onWindowResize);
+
+    itemManager.init();
+    itemManager.updateViewModel();
+    itemManager.updateHotbar();
+    characterManager.loadCharacters();
+    initCreator();
+}
+
+function exportCharacter() {
+    const name = document.getElementById('char-name').value;
+    if (!name.trim()) {
+        alert('エクスポートするキャラクターの名前を入力してください。');
+        return;
+    }
+    if (creator.voxels.length === 0) {
+        alert('キャラクターは少なくとも1つのボクセルで構成されている必要があります。');
+        return;
+    }
+
+    const voxelData = creator.voxels.map(v => ({
+        x: v.position.x,
+        y: v.position.y,
+        z: v.position.z,
+        color: v.material.color.getHex()
+    }));
+
+    const charData = {
+        name: name,
+        speed: parseFloat(document.getElementById('char-speed').value),
+        lifespan: parseInt(document.getElementById('char-lifespan').value),
+        reproduction: document.getElementById('repro-type').value,
+        reproCount: parseInt(document.getElementById('repro-count').value),
+        moveMethod: document.getElementById('move-method').value,
+        voxels: voxelData
+    };
+
+    const jsonString = JSON.stringify(charData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.hrc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importCharacter(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const charData = JSON.parse(e.target.result);
+
+            // --- UIの値を更新 ---
+            document.getElementById('char-name').value = charData.name || '';
+            document.getElementById('char-speed').value = charData.speed || 1;
+            document.getElementById('char-lifespan').value = charData.lifespan || 120;
+            document.getElementById('repro-type').value = charData.reproduction || 'asexual';
+            document.getElementById('repro-count').value = charData.reproCount || 1;
+            document.getElementById('move-method').value = charData.moveMethod || 'random_walk';
+
+            // --- Voxelモデルを再構築 ---
+            // 既存のVoxelをクリア
+            creator.voxels.forEach(v => creator.scene.remove(v));
+            creator.voxels = [];
+
+            if (charData.voxels && Array.isArray(charData.voxels)) {
+                charData.voxels.forEach(vData => {
+                    const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+                    voxel.material.color.set(vData.color);
+                    voxel.position.set(vData.x, vData.y, vData.z);
+                    creator.scene.add(voxel);
+                    creator.voxels.push(voxel);
+                });
+            }
+
+            alert(`キャラクター「${charData.name}」を読み込みました。`);
+
+        } catch (error) {
+            alert('ファイルの読み込みに失敗しました。無効な形式のファイルです。');
+            console.error("Error parsing character file:", error);
+        } finally {
+            // 同じファイルを再度選択できるように、inputの値をリセット
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
+}
+
+function initCreator() {
+    const menuButton = document.getElementById('menu-button');
+    const creatorModal = document.getElementById('creator-modal');
+    const closeButton = document.getElementById('close-creator-button');
+    const saveButton = document.getElementById('save-char-button');
+    const exportButton = document.getElementById('export-char-button');
+    const importButton = document.getElementById('import-char-button');
+    const importFileInput = document.getElementById('import-file-input');
+    const canvas = document.getElementById('voxel-canvas');
+
+    saveButton.addEventListener('click', characterManager.saveCharacter);
+    exportButton.addEventListener('click', exportCharacter);
+    importButton.addEventListener('click', () => importFileInput.click());
+    importFileInput.addEventListener('change', importCharacter);
+
+    // --- Scene Setup ---
+    creator.scene = new THREE.Scene();
+    creator.scene.background = new THREE.Color(0x222233);
+
+    const aLight = new THREE.AmbientLight(0xffffff, 0.6);
+    creator.scene.add(aLight);
+    const dLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dLight.position.set(10, 15, 5);
+    creator.scene.add(dLight);
+
+    creator.camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+    creator.camera.position.set(10, 10, 10);
+
+    creator.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    creator.controls = new OrbitControls(creator.camera, creator.renderer.domElement);
+
+    // --- Grid & Floor ---
+    creator.gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x444444);
+    creator.scene.add(creator.gridHelper);
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floorMat = new THREE.MeshBasicMaterial({ visible: false });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.name = 'floor';
+    creator.scene.add(floor);
+
+
+    menuButton.addEventListener('click', () => {
+        creator.isOpen = true;
+        creatorModal.style.display = 'block';
+        if (!isMobile) controls.unlock();
+        const panel = document.getElementById('editor-panel');
+        creator.camera.aspect = panel.clientWidth / panel.clientHeight;
+        creator.camera.updateProjectionMatrix();
+        creator.renderer.setSize(panel.clientWidth, panel.clientHeight);
+    });
+
+    closeButton.addEventListener('click', () => {
+        creator.isOpen = false;
+        creatorModal.style.display = 'none';
+    });
+
+    // --- Edit Tools ---
+    const addTool = document.getElementById('add-voxel-tool');
+    const removeTool = document.getElementById('remove-voxel-tool');
+
+    function setEditMode(mode) {
+        creator.editMode = mode;
+        addTool.classList.toggle('selected', mode === 'add');
+        removeTool.classList.toggle('selected', mode === 'remove');
+    }
+
+    addTool.addEventListener('click', () => setEditMode('add'));
+    removeTool.addEventListener('click', () => setEditMode('remove'));
+
+    // --- Color Palette ---
+    const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffffff, 0x000000, 0xffa500, 0x800080, 0x32cd32, 0x8b4513, 'transparent'];
+    const palette = document.getElementById('color-palette');
+    colors.forEach(color => {
+        const colorBox = document.createElement('div');
+        colorBox.className = 'color-box';
+        if (color === 'transparent') {
+            colorBox.style.background = 'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 10px 10px';
+            colorBox.dataset.color = 'transparent';
+        } else {
+            colorBox.style.backgroundColor = `#${color.toString(16).padStart(6, '0')}`;
+            colorBox.dataset.color = color;
+        }
+
+        if (color === creator.selectedColor) {
+            colorBox.classList.add('selected');
+        }
+        colorBox.addEventListener('click', () => {
+            creator.selectedColor = color;
+            document.querySelectorAll('.color-box').forEach(box => box.classList.remove('selected'));
+            colorBox.classList.add('selected');
+            // Switch to add mode automatically when a color is selected
+            if (color !== 'transparent') {
+                setEditMode('add');
+            }
+        });
+        palette.appendChild(colorBox);
+    });
+
+    // --- Voxel Logic ---
+    const hoverCube = new THREE.Mesh(
+        new THREE.BoxGeometry(1.02, 1.02, 1.02),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+    );
+    creator.scene.add(hoverCube);
+
+    function getPointerPosition(event) {
+        const rect = canvas.getBoundingClientRect();
+        creator.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        creator.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    canvas.addEventListener('pointermove', (event) => {
+        getPointerPosition(event);
+        creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+        const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+
+        if (intersects.length > 0) {
+            const intersect = intersects[0];
+            const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal);
+            pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+            hoverCube.position.copy(pos);
+            hoverCube.visible = true;
+        } else {
+            hoverCube.visible = false;
+        }
+    });
+
+    canvas.addEventListener('pointerdown', (event) => {
+        getPointerPosition(event);
+        creator.raycaster.setFromCamera(creator.pointer, creator.camera);
+        const intersects = creator.raycaster.intersectObjects([...creator.voxels, floor]);
+        if (intersects.length === 0) return;
+
+        const intersect = intersects[0];
+
+        // For PC, allow right-click to always remove
+        if (event.button === 2) {
+            if (intersect.object !== floor) {
+                creator.scene.remove(intersect.object);
+                creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+            }
+            return;
+        }
+
+        // For left-click and touch, use the selected tool
+        if (creator.editMode === 'remove') {
+            if (intersect.object !== floor) {
+                creator.scene.remove(intersect.object);
+                creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+            }
+        } else { // 'add' mode
+            if (creator.selectedColor === 'transparent') {
+                // If transparent is selected in add mode, behave like remove tool
+                 if (intersect.object !== floor) {
+                    creator.scene.remove(intersect.object);
+                    creator.voxels = creator.voxels.filter(v => v !== intersect.object);
+                }
+                return;
+            }
+            const pos = new THREE.Vector3().copy(intersect.point).add(intersect.face.normal.clone().multiplyScalar(0.5));
+            pos.divideScalar(1).floor().multiplyScalar(1).addScalar(0.5);
+
+            if (creator.voxels.some(v => v.position.equals(pos))) return;
+
+            const voxel = new THREE.Mesh(creator.voxelGeometry, creator.voxelMaterial.clone());
+            voxel.material.color.set(creator.selectedColor);
+            voxel.position.copy(pos);
+            creator.scene.add(voxel);
+            creator.voxels.push(voxel);
+        }
+    });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+}
+
+function setupMobileControls() {
+    const joystickThumb = document.getElementById('joystick-thumb');
+    const joystickArea = joystickThumb.parentElement;
+    const jumpButton = document.getElementById('jump-button');
+    const dashButton = document.getElementById('dash-button');
+    const cameraControls = document.getElementById('camera-controls');
+    const controlsRoot = document.getElementById('mobile-controls'); 
+
+    let joystickRect = joystickArea.getBoundingClientRect();
+
+    controlsRoot.addEventListener('touchstart', (e) => {
+        e.preventDefault(); 
+        joystickRect = joystickArea.getBoundingClientRect();
+
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+
+            if (joystickArea.contains(touch.target)) {
+                if (activeTouch.joystick === null) {
+                    activeTouch.joystick = touch.identifier;
+                }
+            } 
+            else if (jumpButton.contains(touch.target)) {
+                if (canJump && !isLandingAnimActive) {
+                    velocity.y += 160;
+                    canJump = false;
+                }
+            }
+            else if (dashButton.contains(touch.target)) {
+                mobileDashMode = !mobileDashMode;
+                if (mobileDashMode) {
+                    dashButton.classList.add('active');
+                } else {
+                    dashButton.classList.remove('active');
+                }
+            }
+            else if (activeTouch.camera === null) {
+                activeTouch.camera = touch.identifier;
+                cameraControls.dataset.prevX = touch.clientX;
+                cameraControls.dataset.prevY = touch.clientY;
+            }
+        }
+    }, { passive: false });
+
+    controlsRoot.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const x = touch.clientX;
+            const y = touch.clientY;
+
+            // --- Joystick Logic ---
+            if (touch.identifier === activeTouch.joystick) {
+                const center = { x: joystickRect.left + joystickRect.width / 2, y: joystickRect.top + joystickRect.height / 2 };
+
+                let dx = x - center.x;
+                let dy = y - center.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const maxDist = joystickRect.width / 2;
+
+                // ジョイスティックの見た目を更新
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+                joystickThumb.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
+
+                // 入力値の計算: 最大距離で割って -1.0 ~ 1.0 に正規化
+                const normX = dx / maxDist;
+                const normY = dy / maxDist;
+
+                // デッドゾーン (少し遊びを作る)
+                const deadzone = 0.1;
+                joystickInput.x = Math.abs(normX) > deadzone ? normX : 0;
+                joystickInput.y = Math.abs(normY) > deadzone ? normY : 0;
+
+                // スプリント判定
+                const strength = Math.min(dist / maxDist, 1.0);
+                if (mobileDashMode) {
+                    isSprinting = true;
+                } else {
+                    // スティックを8割以上倒し、かつ前方向(y < 0)の場合のみスプリント
+                    isSprinting = strength > 0.8 && normY < -0.3;
+                }
+            } 
+
+            // --- Camera Logic ---
+            else if (touch.identifier === activeTouch.camera) {
+                const prevX = parseFloat(cameraControls.dataset.prevX);
+                const prevY = parseFloat(cameraControls.dataset.prevY);
+                const sensitivity = 0.002; 
+
+                const dx = (x - prevX) * sensitivity;
+                const dy = (y - prevY) * sensitivity;
+
+                playerBody.rotation.y -= dx * SENSITIVITY_MULTIPLIER; 
+                const cam = camera;
+                cam.rotation.x -= dy * SENSITIVITY_MULTIPLIER; 
+                cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+
+                cameraControls.dataset.prevX = x;
+                cameraControls.dataset.prevY = y;
+            }
+        }
+    }, { passive: false });
+
+    controlsRoot.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+
+            if (touch.identifier === activeTouch.joystick) {
+                activeTouch.joystick = null;
+                joystickThumb.style.transform = `translate(-50%, -50%)`;
+                joystickInput.x = 0;
+                joystickInput.y = 0;
+                if (!mobileDashMode) isSprinting = false;
+            }
+
+            else if (touch.identifier === activeTouch.camera) {
+                activeTouch.camera = null;
+                delete cameraControls.dataset.prevX;
+                delete cameraControls.dataset.prevY;
+            }
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        joystickRect = joystickArea.getBoundingClientRect();
+    });
+}
+
+function prepareAssets() {
+    const trunkGeo = new THREE.CylinderGeometry(1, 2.5, 12, 6);
+    trunkGeo.translate(0, 6, 0);
+    const leavesGeo = new THREE.ConeGeometry(7, 18, 6);
+    leavesGeo.translate(0, 20, 0);
+    const leavesGeo2 = new THREE.ConeGeometry(5, 14, 6);
+    leavesGeo2.translate(0, 28, 0);
+
+    treeGeometry = BufferGeometryUtils.mergeGeometries([trunkGeo, leavesGeo, leavesGeo2]);
+    treeMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x44bb66, 
+        flatShading: true, 
+        roughness: 0.8,
+        emissive: 0x002211,
+        emissiveIntensity: 0.2
+    });
+
+    grassGeometry = new THREE.PlaneGeometry(4, 4);
+    grassGeometry.translate(0, 2, 0);
+    grassMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x99dd55, 
+        side: THREE.DoubleSide, 
+        alphaTest: 0.5,
+        emissive: 0x113300,
+        emissiveIntensity: 0.1
+    });
+
+    waterGeometry = new THREE.PlaneGeometry(chunkSize, chunkSize);
+    waterGeometry.rotateX(-Math.PI / 2);
+    waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x22eeff,
+        transparent: true,
+        opacity: 0.7, 
+        roughness: 0.1,
+        metalness: 0.3,
+        emissive: 0x006688,
+        emissiveIntensity: 0.4
+    });
+}
+
+function getNoiseHeight(x, z) {
+    const dist = Math.sqrt(x * x + z * z);
+    let baseHeight = Math.abs(perlin.noise(x * 0.003 + seed, z * 0.003 + seed, seed)) * 30;
+    let finalHeight = baseHeight;
+
+    if (dist < BASIN_WALL_END) {
+        if (dist < BASIN_FLAT_RADIUS) {
+            let h = 32 + perlin.noise(x * 0.008, z * 0.008, seed) * 10;
+            const riverNoise = perlin.noise(x * 0.004 + seed, z * 0.004 + seed, seed + 10);
+            if (riverNoise < -0.15) {
+                h -= (-0.15 - riverNoise) * 60; 
+            }
+            if (dist < 180) {
+                h -= (1.0 - (dist / 180)) * 25;
+            }
+            finalHeight = h;
+        } else {
+            let wallFactor = 0;
+            if (dist < BASIN_PEAK_DIST) {
+                const t = (dist - BASIN_WALL_START) / (BASIN_PEAK_DIST - BASIN_WALL_START);
+                wallFactor = t * t * (3 - 2 * t);
+            } else {
+                const t = (dist - BASIN_PEAK_DIST) / (BASIN_WALL_END - BASIN_PEAK_DIST);
+                wallFactor = 1 - (t * t * (3 - 2 * t)); 
+            }
+            const mountainNoise = Math.abs(perlin.noise(x * 0.02, z * 0.02, seed + 50)) * 180;
+            finalHeight = baseHeight + (WALL_HEIGHT + mountainNoise) * wallFactor;
+            if (dist < BASIN_PEAK_DIST && finalHeight < 30) finalHeight = 30; 
+        }
+    } else {
+        let blend = (dist - BASIN_WALL_END) / 1500;
+        if (blend > 1.0) blend = 1.0;
+        blend = blend * blend * (3 - 2 * blend); 
+
+        const biomeNoise = perlin.noise(x * 0.0004, z * 0.0004, seed + 100);
+        const mountainMix = THREE.MathUtils.smoothstep(biomeNoise, 0.2, 0.6);
+        const largeMtn = Math.abs(perlin.noise(x * 0.0015, z * 0.0015, seed + 10)) * 1200;
+        const detailMtn = perlin.noise(x * 0.01, z * 0.01, seed + 20) * 150;
+        const mountainShape = largeMtn + detailMtn;
+        const hillBase = perlin.noise(x * 0.001, z * 0.001, seed + 30) * 60; 
+        const hillDetail = perlin.noise(x * 0.005, z * 0.005, seed + 40) * 20;
+        const riverCarver = Math.abs(perlin.noise(x * 0.0005 + 500, z * 0.0005 + 500, seed + 60));
+        let riverDepth = riverCarver < 0.1 ? (0.1 - riverCarver) * 800 : 0;
+        const plainShape = 35 + hillBase + hillDetail - riverDepth;
+        let outerTerrain = (mountainShape * mountainMix) + (plainShape * (1 - mountainMix));
+        finalHeight = baseHeight + (outerTerrain * blend);
+    }
+    return finalHeight; 
+}
+
+function getFinalHeight(x, z) {
+    let height = getNoiseHeight(x, z);
+    for (const deform of terrainDeformations) {
+        const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+        if (distance < deform.radius) {
+            const depression = deform.maxDepth * (1 - (distance / deform.radius));
+            height += depression;
+        }
+    }
+    return height;
+}
+
+function getSlope(x, z) {
+    const step = 2;
+    const h = getFinalHeight(x, z);
+    const hx = getFinalHeight(x + step, z);
+    const hz = getFinalHeight(x, z + step);
+    const dx = (hx - h) / step;
+    const dz = (hz - h) / step;
+    return Math.sqrt(dx*dx + dz*dz);
+}
+
+function updateChunks() {
+    const playerPos = playerBody.position;
+    const cx = Math.floor(playerPos.x / chunkSize);
+    const cz = Math.floor(playerPos.z / chunkSize);
+    const activeKeys = new Set();
+    for (let x = -renderDistance; x <= renderDistance; x++) {
+        for (let z = -renderDistance; z <= renderDistance; z++) {
+            const key = `${cx + x},${cz + z}`;
+            activeKeys.add(key);
+            if (!chunks[key]) createChunk(cx + x, cz + z);
+        }
+    }
+    for (const key in chunks) {
+        if (!activeKeys.has(key)) {
+            scene.remove(chunks[key]);
+            delete chunks[key];
+        }
+    }
+}
+
+function createChunk(cx, cz) {
+    const group = new THREE.Group();
+    const geometry = new THREE.PlaneGeometry(chunkSize, chunkSize, chunkRes, chunkRes);
+    geometry.rotateX(-Math.PI / 2);
+    const posAttr = geometry.attributes.position;
+    const colors = [];
+
+    for (let i = 0; i < posAttr.count; i++) {
+        const x = posAttr.getX(i) + (cx * chunkSize);
+        const z = posAttr.getZ(i) + (cz * chunkSize);
+        const y = getFinalHeight(x, z);
+        posAttr.setY(i, y);
+
+        let inCrater = false;
+        for (const deform of terrainDeformations) {
+            const distance = Math.sqrt((x - deform.position.x)**2 + (z - deform.position.z)**2);
+            if (distance < deform.radius) {
+                inCrater = true;
+                break;
+            }
+        }
+
+        if (inCrater) {
+            colors.push(0.2, 0.2, 0.2); // Scorched earth color
+        } else {
+            if (y < waterLevel + 3) colors.push(0.85, 0.8, 0.65);
+            else if (y < 120) {
+                const n = perlin.noise(x*0.02, z*0.02, seed);
+                colors.push(0.35 + n * 0.1, 0.7 + n * 0.15, 0.3 + n * 0.1); 
+            } else if (y < 400) colors.push(0.6, 0.55, 0.5); 
+            else colors.push(0.96, 0.98, 1.0);
+        }
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+
+    const terrainMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1.0 }));
+    terrainMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+    terrainMesh.receiveShadow = true;
+    group.add(terrainMesh);
+
+    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    waterMesh.position.set(cx * chunkSize, waterLevel, cz * chunkSize);
+    group.add(waterMesh);
+
+    const treeCount = 60; 
+    const treeMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, treeCount);
+    treeMesh.castShadow = true; treeMesh.receiveShadow = true;
+    treeMesh.userData.instanceIds = {}; // Initialize once before the loop
+    const dummy = new THREE.Object3D();
+    let tIdx = 0;
+    for (let i = 0; i < treeCount; i++) {
+        const treeId = `${cx},${cz},${i}`;
+        if (removedTrees.has(treeId)) continue;
+
+        const rx = (Math.random() - 0.5) * chunkSize;
+        const rz = (Math.random() - 0.5) * chunkSize;
+        const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+        const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
+        if (h > waterLevel + 4 && slope < 1.2 && h < 250 && Math.random() > 0.4) {
+            dummy.position.set(rx, h, rz);
+            const s = 0.8 + Math.random() * 1.0; 
+            dummy.scale.set(s, s, s);
+            dummy.rotation.y = Math.random() * Math.PI * 2;
+            dummy.updateMatrix();
+            treeMesh.setMatrixAt(tIdx, dummy.matrix);
+            treeMesh.userData.instanceIds[tIdx] = treeId;
+            tIdx++;
+        }
+    }
+    treeMesh.count = tIdx; 
+    treeMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+    group.add(treeMesh);
+
+    const grassCount = 1200;
+    const grassMesh = new THREE.InstancedMesh(grassGeometry, grassMaterial, grassCount);
+    let gIdx = 0;
+    for (let i = 0; i < grassCount; i++) {
+        const rx = (Math.random() - 0.5) * chunkSize;
+        const rz = (Math.random() - 0.5) * chunkSize;
+        const h = getFinalHeight(rx + cx * chunkSize, rz + cz * chunkSize);
+        const slope = getSlope(rx + cx * chunkSize, rz + cz * chunkSize);
+        if (h > waterLevel + 2 && h < 250 && slope < 0.8) {
+            dummy.position.set(rx, h, rz);
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(0, Math.random() * Math.PI, 0);
+            dummy.updateMatrix();
+            grassMesh.setMatrixAt(gIdx++, dummy.matrix);
+        }
+    }
+    grassMesh.count = gIdx;
+    grassMesh.position.set(cx * chunkSize, 0, cz * chunkSize);
+    group.add(grassMesh);
+
+    scene.add(group);
+    chunks[`${cx},${cz}`] = group;
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+
+function deformTerrain(position) {
+    const radius = 45;
+    const maxDepth = -15;
+
+    // Store the deformation data for persistence, ensuring it's available for future chunk loads.
+    terrainDeformations.push({ position: position.clone(), radius, maxDepth });
+
+    // Define the bounding box of the explosion's area of effect.
+    const minX = position.x - radius;
+    const maxX = position.x + radius;
+    const minZ = position.z - radius;
+    const maxZ = position.z + radius;
+
+    // Determine the range of chunks that overlap with the bounding box.
+    const startChunkX = Math.floor(minX / chunkSize);
+    const endChunkX = Math.floor(maxX / chunkSize);
+    const startChunkZ = Math.floor(minZ / chunkSize);
+    const endChunkZ = Math.floor(maxZ / chunkSize);
+
+    const affectedChunkKeys = new Set();
+
+    // Iterate through all chunk coordinates within the calculated range.
+    for (let cx = startChunkX; cx <= endChunkX; cx++) {
+        for (let cz = startChunkZ; cz <= endChunkZ; cz++) {
+            const key = `${cx},${cz}`;
+            // Only process chunks that are currently loaded in the scene.
+            // Chunks loaded later will correctly apply the deformation from the start.
+            if (chunks[key]) {
+                affectedChunkKeys.add(key);
+            }
+        }
+    }
+
+    // Regenerate all identified chunks.
+    affectedChunkKeys.forEach(key => {
+        const chunkGroup = chunks[key];
+        if (chunkGroup) {
+            // Properly dispose of the old chunk's resources to prevent memory leaks.
+            chunkGroup.traverse(child => {
+                if (child.isMesh || child.isInstancedMesh) {
+                    if(child.geometry) child.geometry.dispose();
+                    if(child.material) child.material.dispose(); // Dispose materials as well
+                }
+            });
+            scene.remove(chunkGroup);
+            delete chunks[key]; // Remove the reference from our tracking object.
+
+            // Re-create the chunk using its coordinates.
+            const coords = key.split(',');
+            const cx = parseInt(coords[0], 10);
+            const cz = parseInt(coords[1], 10);
+            createChunk(cx, cz);
+        }
+    });
+}
+
+function updateC4(time, delta) {
+    for (let i = activeC4s.length - 1; i >= 0; i--) {
+        const c4 = activeC4s[i];
+        const elapsedTime = (time - c4.placedTime) / 1000;
+
+        if (elapsedTime > 3) { // Detonate after 3 seconds
+            // Create explosion particles
+            createExplosionParticles(c4.model.position);
+
+            // Add flash of light
+            const explosionLight = new THREE.PointLight(0xffffff, 100, 200);
+            explosionLight.position.copy(c4.model.position);
+            scene.add(explosionLight);
+            setTimeout(() => scene.remove(explosionLight), 200);
+
+            // Apply force to player if nearby
+            const distanceToPlayer = playerBody.position.distanceTo(c4.model.position);
+            if (distanceToPlayer < 80) { // Increased blast radius for force
+                const blastDirection = new THREE.Vector3().subVectors(playerBody.position, c4.model.position).normalize();
+                const blastForce = (1.0 - (distanceToPlayer / 80)) * 4000;
+                velocity.add(blastDirection.multiplyScalar(blastForce));
+
+                // Set camera shake based on distance
+                cameraShake.time = 0.8; // duration
+                cameraShake.intensity = (1.0 - (distanceToPlayer / 80)) * 0.4;
+            }
+
+            // Deform terrain and destroy trees
+            deformTerrain(c4.model.position);
+            const explosionRadius = 60; // Increased radius
+            for (const key in chunks) {
+                const chunk = chunks[key];
+                const treeMesh = chunk.children.find(c => c.isInstancedMesh && c.material === treeMaterial);
+                if (treeMesh) {
+                    const dummy = new THREE.Object3D();
+                    let needsUpdate = false;
+                    for (let i = 0; i < treeMesh.count; i++) {
+                        const treeId = treeMesh.userData.instanceIds[i];
+                        if (!treeId || removedTrees.has(treeId)) continue;
+
+                        treeMesh.getMatrixAt(i, dummy.matrix);
+                        const treePosition = new THREE.Vector3().setFromMatrixPosition(dummy.matrix);
+                        treePosition.add(treeMesh.position);
+
+                        if (treePosition.distanceTo(c4.model.position) < explosionRadius) {
+                            removedTrees.add(treeId);
+                            const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+                            treeMesh.setMatrixAt(i, zeroMatrix);
+                            needsUpdate = true;
+                        }
+                    }
+                    if (needsUpdate) {
+                        treeMesh.instanceMatrix.needsUpdate = true;
+                    }
+                }
+            }
+
+
+            // Remove C4 from scene and array
+            scene.remove(c4.model);
+            activeC4s.splice(i, 1);
+        }
+    }
+}
+
+let explosionParticles = [];
+function createExplosionParticles(position) {
+    // --- Fireball ---
+    const fireCount = 150;
+    const fireGeo = new THREE.BufferGeometry();
+    const firePos = new Float32Array(fireCount * 3);
+    const fireVel = new Float32Array(fireCount * 3);
+    const fireColors = new Float32Array(fireCount * 3);
+
+    for (let i = 0; i < fireCount; i++) {
+        const phi = Math.acos(-1 + (2 * i) / fireCount);
+        const theta = Math.sqrt(fireCount * Math.PI) * phi;
+        const x = Math.cos(theta) * Math.sin(phi);
+        const y = Math.sin(theta) * Math.sin(phi);
+        const z = Math.cos(phi);
+
+        const speed = 20 + Math.random() * 30;
+
+        firePos[i * 3 + 0] = position.x;
+        firePos[i * 3 + 1] = position.y;
+        firePos[i * 3 + 2] = position.z;
+
+        fireVel[i * 3 + 0] = x * speed;
+        fireVel[i * 3 + 1] = y * speed * 0.8; // Slightly less vertical
+        fireVel[i * 3 + 2] = z * speed;
+
+        const color = new THREE.Color();
+        color.setHSL(0.1 * Math.random(), 1.0, 0.5);
+        fireColors[i * 3 + 0] = color.r;
+        fireColors[i * 3 + 1] = color.g;
+        fireColors[i * 3 + 2] = color.b;
+    }
+    fireGeo.setAttribute('position', new THREE.BufferAttribute(firePos, 3));
+    fireGeo.setAttribute('velocity', new THREE.BufferAttribute(fireVel, 3));
+    fireGeo.setAttribute('color', new THREE.BufferAttribute(fireColors, 3));
+
+    const fireMat = new THREE.PointsMaterial({
+        vertexColors: true,
+        size: 3.0,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const fireball = new THREE.Points(fireGeo, fireMat);
+    fireball.userData = { startTime: performance.now(), type: 'fire', duration: 0.8 };
+    scene.add(fireball);
+    explosionParticles.push(fireball);
+
+    // --- Smoke ---
+    const smokeCount = 250;
+    const smokeGeo = new THREE.BufferGeometry();
+    const smokePos = new Float32Array(smokeCount * 3);
+    const smokeVel = new Float32Array(smokeCount * 3);
+
+    for (let i = 0; i < smokeCount; i++) {
+        const x = (Math.random() - 0.5) * 2;
+        const y = Math.random();
+        const z = (Math.random() - 0.5) * 2;
+        const dir = new THREE.Vector3(x, y, z).normalize();
+
+        const speed = 10 + Math.random() * 20;
+
+        smokePos[i * 3 + 0] = position.x + (Math.random()-0.5) * 5;
+        smokePos[i * 3 + 1] = position.y + (Math.random()-0.5) * 5;
+        smokePos[i * 3 + 2] = position.z + (Math.random()-0.5) * 5;
+
+        smokeVel[i * 3 + 0] = dir.x * speed;
+        smokeVel[i * 3 + 1] = dir.y * speed + 10; // Bias upwards
+        smokeVel[i * 3 + 2] = dir.z * speed;
+    }
+    smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3));
+    smokeGeo.setAttribute('velocity', new THREE.BufferAttribute(smokeVel, 3));
+
+    const smokeMat = new THREE.PointsMaterial({
+        color: 0x333333,
+        size: 8.0,
+        transparent: true,
+        depthWrite: false
+    });
+    const smoke = new THREE.Points(smokeGeo, smokeMat);
+    smoke.userData = { startTime: performance.now(), type: 'smoke', duration: 3.5 };
+    scene.add(smoke);
+    explosionParticles.push(smoke);
+}
+
+function handleGamepadInput() {
+    if (!gamepadConnected) return; 
+    const gamepad = navigator.getGamepads()[0];
+    if (!gamepad) return;
+    const deadzone = 0.15;
+
+    const leftStickX = gamepad.axes[0];
+    const leftStickY = gamepad.axes[1];
+    if (Math.abs(leftStickX) > deadzone || Math.abs(leftStickY) > deadzone) {
+        // Gamepad Analog Logic
+        direction.z = leftStickY < -deadzone ? 1 : (leftStickY > deadzone ? -1 : 0);
+        direction.x = leftStickX > deadzone ? 1 : (leftStickX < -deadzone ? -1 : 0);
+    } else if (!isMobile) {
+        moveForward = keyState['KeyW'] || false;
+        moveBackward = keyState['KeyS'] || false;
+        moveLeft = keyState['KeyA'] || false;
+        moveRight = keyState['KeyD'] || false;
+    }
+    isSprinting = gamepad.buttons[10].pressed || keyState['ShiftLeft'] || false; 
+
+    const rightStickX = gamepad.axes[2];
+    const rightStickY = gamepad.axes[3];
+    const sensitivity = 0.02; 
+    if (Math.abs(rightStickX) > deadzone) playerBody.rotation.y -= rightStickX * sensitivity * SENSITIVITY_MULTIPLIER;
+    if (Math.abs(rightStickY) > deadzone) {
+        const cam = camera;
+        cam.rotation.x -= rightStickY * sensitivity * SENSITIVITY_MULTIPLIER;
+        cam.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cam.rotation.x));
+    }
+    if (gamepad.buttons[0].pressed && canJump && !isLandingAnimActive) {
+        velocity.y += 160;
+        canJump = false;
+    }
+}
+
+function handleKeyboardInput() {
+    if (isMobile || gamepadConnected) return;
+    moveForward = keyState['KeyW'] || false;
+    moveBackward = keyState['KeyS'] || false;
+    moveLeft = keyState['KeyA'] || false;
+    moveRight = keyState['KeyD'] || false;
+    isSprinting = keyState['ShiftLeft'] || false;
+    if (keyState['Space'] && canJump && !isLandingAnimActive) {
+        velocity.y += 160;
+        canJump = false;
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    handleKeyboardInput();
+    handleGamepadInput();
+
+    const time = performance.now();
+    const delta = Math.min((time - prevTime) / 1000, 0.1); 
+    prevTime = time;
+
+    if (sky) {
+        const tempVec = new THREE.Vector3().copy(sky.material.uniforms['sunPosition'].value).normalize();
+        const dirLight = scene.children.find(c => c.isDirectionalLight);
+        if (dirLight) dirLight.position.copy(tempVec).multiplyScalar(10000);
+    }
+
+    const gameActive = controls.isLocked || (isMobile && blocker.style.display === 'none');
+
+    if (creator.isOpen) {
+        creator.controls.update();
+        creator.renderer.render(creator.scene, creator.camera);
+    }
+
+    if (gameActive) {
+        updateC4(time, delta);
+
+        // Update bullet effects
+        for (let i = activeBullets.length - 1; i >= 0; i--) {
+            const bullet = activeBullets[i];
+            const elapsedTime = (time - bullet.object.userData.startTime) / 1000;
+            let duration = bullet.type === 'tracer' ? 0.1 : 0.3;
+
+            if (elapsedTime > duration) {
+                scene.remove(bullet.object);
+                if (bullet.object.geometry) bullet.object.geometry.dispose();
+                if (bullet.object.material) bullet.object.material.dispose();
+                activeBullets.splice(i, 1);
+            } else {
+                bullet.object.material.opacity = 1.0 - (elapsedTime / duration);
+            }
+        }
+
+
+        // Update explosion particles
+        for (let i = explosionParticles.length - 1; i >= 0; i--) {
+            const particleSystem = explosionParticles[i];
+            const elapsedTime = (time - particleSystem.userData.startTime) / 1000;
+            const duration = particleSystem.userData.duration;
+
+            if (elapsedTime > duration) {
+                scene.remove(particleSystem);
+                particleSystem.geometry.dispose();
+                particleSystem.material.dispose();
+                explosionParticles.splice(i, 1);
+                continue;
+            }
+
+            const positions = particleSystem.geometry.attributes.position;
+            const velocities = particleSystem.geometry.attributes.velocity;
+
+            for (let j = 0; j < positions.count; j++) {
+                positions.setX(j, positions.getX(j) + velocities.getX(j) * delta);
+                positions.setY(j, positions.getY(j) + velocities.getY(j) * delta);
+                positions.setZ(j, positions.getZ(j) + velocities.getZ(j) * delta);
+
+                if (particleSystem.userData.type === 'fire') {
+                    velocities.setY(j, velocities.getY(j) - 9.8 * delta * 3.0); // Gravity on fire
+                } else { // smoke
+                    velocities.setX(j, velocities.getX(j) * (1.0 - delta * 0.2)); // Air drag
+                    velocities.setZ(j, velocities.getZ(j) * (1.0 - delta * 0.2));
+                    velocities.setY(j, velocities.getY(j) * (1.0 - delta * 0.1));
+                }
+            }
+            positions.needsUpdate = true;
+            particleSystem.material.opacity = 1.0 - (elapsedTime / duration);
+        }
+
+        characterManager.update(delta, time);
+        updateChunks();
+        const body = playerBody;
+        const dampingX = canJump ? 8.0 : 1.0; 
+        const dampingZ = canJump ? 8.0 : 1.0;
+        velocity.x -= velocity.x * dampingX * delta;
+        velocity.z -= velocity.z * dampingZ * delta;
+        velocity.y -= 9.8 * 60.0 * delta; 
+
+        // Jetpack logic
+        const selectedItem = itemManager.items[itemManager.selectedItem];
+        if (selectedItem && selectedItem.name === 'Jetpack' && keyState['Space']) {
+            velocity.y += 9.8 * 90.0 * delta; // Apply upward force to counteract gravity and ascend
+        }
+
+        // --- 移動方向の決定 ---
+        if (isMobile && activeTouch.joystick !== null) {
+            // モバイル: ジョイスティック入力値をそのまま方向として使う
+            // Joystick Y: 上が負、下が正。
+            // PCロジック: 前進すると velocity.z を減らす(負にする)。
+            // つまり、ジョイスティックを上に倒す(Y < 0) -> 前進したい -> velocity.z を減らしたい -> direction.z を正にしたい。
+            // なので direction.z = -joystickInput.y (例: -(-1) = 1)
+            direction.z = -joystickInput.y; 
+
+            // Joystick X: 右が正、左が負。
+            // PCロジック: 右へ行くと velocity.x を減らす(負にする)。
+            // controls.moveRight は引数が負だと右へ行く(内部で-distance)。
+            // つまり、ジョイスティックを右に倒す(X > 0) -> 右へ行きたい -> velocity.x を減らしたい -> direction.x を正にしたい。
+            // なので direction.x = joystickInput.x
+            direction.x = joystickInput.x;
+        } 
+        else if (!gamepadConnected) {
+            // PC Keyboard
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+        } 
+        else if (gamepadConnected) {
+            // Gamepad logic is partly in handleGamepadInput, ensure consistency
+            // (Gamepad part already writes to direction, no change needed)
+        }
+
+        if (direction.lengthSq() > 0) direction.normalize();
+
+        const speedBase = isSprinting ? 1200.0 : 600.0;
+
+        // --- 速度の更新 ---
+        // direction.z > 0 (前進入力) -> velocity.z を減らす -> velocity.z は負になる
+        // direction.x > 0 (右移動入力) -> velocity.x を減らす -> velocity.x は負になる
+        if (!isLandingAnimActive) {
+            // 入力がある場合のみ加速
+            if (isMobile ? (activeTouch.joystick !== null) : (moveForward || moveBackward || moveLeft || moveRight)) {
+                velocity.z -= direction.z * speedBase * delta;
+                velocity.x -= direction.x * speedBase * delta;
+            }
+        }
+
+        // --- 座標の更新 (ローカル座標移動) ---
+        if (isMobile) {
+            // モバイルもPCと同じく「向いている方向」に対して移動させる
+            // playerBody.rotation.y によって回転しているので、translateX/Z を使えば勝手に視点方向に動く
+
+            // X軸: velocity.x が負のとき右へ行く必要がある
+            // translateX(d) は d>0 で右へ移動。
+            // velocity.x は右移動で負になるので、-velocity.x を渡すと正になり右へ動く。正解。
+            playerBody.translateX( -velocity.x * delta );
+
+            // Z軸: velocity.z が負のとき前へ行く必要がある
+            // translateZ(d) は d>0 で手前(後ろ)、d<0 で奥(前)へ移動。
+            // velocity.z は前進で負になるので、そのまま渡せば奥へ動く。正解。
+            playerBody.translateZ( velocity.z * delta );
+        } else {
+            // PC用 (PointerLockControlsの関数を使用)
+            controls.moveRight( -velocity.x * delta );
+            controls.moveForward( -velocity.z * delta );
+        }
+
+        body.position.y += (velocity.y * delta); 
+
+        const groundHeight = getFinalHeight(body.position.x, body.position.z);
+
+        if (body.position.y < groundHeight + standingEyeHeight) {
+            if (!canJump) { 
+                const fallSpeed = Math.abs(velocity.y);
+                if (fallSpeed > landingAnimThreshold) {
+                    isLandingAnimActive = true;
+                    landingAnimStartTime = time;
+                    const forwardDir = new THREE.Vector3();
+                    camera.getWorldDirection(forwardDir);
+                    forwardDir.y = 0; forwardDir.normalize();
+                    velocity.add(forwardDir.multiplyScalar(300)); 
+                } else {
+                    camOffset.y -= Math.min(fallSpeed / 10, 5.0); 
+                }
+            }
+            velocity.y = 0;
+            body.position.y = groundHeight + standingEyeHeight;
+            canJump = true;
+        }
+
+        let landingAnimOffsetHeight = 0;
+        camera.rotation.x -= landingAnimRotationX;
+
+        if (isLandingAnimActive) {
+            const elapsed = (time - landingAnimStartTime) / 1000;
+            if (elapsed < landingAnimDuration) {
+                const t = elapsed / landingAnimDuration;
+                landingAnimOffsetHeight = -(Math.sin(t * Math.PI) * 8.5);
+                landingAnimRotationX = -2 * Math.PI * easeOutCubic(t);
+            } else {
+                isLandingAnimActive = false;
+                landingAnimRotationX = 0; 
+            }
+        }
+
+        const currentSpeed = Math.sqrt(velocity.x**2 + velocity.z**2);
+        if (canJump && !isLandingAnimActive && currentSpeed > 5) {
+            const frequency = isSprinting ? 16 : 11;
+            walkCycle += delta * frequency;
+            camOffset.y += (Math.sin(walkCycle) * (isSprinting ? 0.6 : 0.3) - camOffset.y) * delta * 15;
+            camOffset.x += (Math.cos(walkCycle * 0.5) * (isSprinting ? 0.5 : 0.3) - camOffset.x) * delta * 15;
+        } else {
+            camOffset.y += (Math.sin(time * 0.002) * 0.05 - camOffset.y) * delta * 5;
+            camOffset.x += (0 - camOffset.x) * delta * 5;
+        }
+
+        if (!isLandingAnimActive) {
+            let tiltTarget = 0;
+            // Tilt logic with analog input support
+            if (direction.x > 0.1) tiltTarget = -0.05; // 右移動で右に傾く
+            if (direction.x < -0.1) tiltTarget = 0.05; // 左移動で左に傾く
+            if (isSprinting) tiltTarget *= 2.0;
+            targetTiltAngle += (tiltTarget - targetTiltAngle) * delta * 10;
+        } else targetTiltAngle = 0;
+
+        camera.position.y = standingEyeHeight + camOffset.y + landingAnimOffsetHeight;
+        camera.position.x = camOffset.x;
+
+        // Apply camera shake
+        if (cameraShake.time > 0) {
+            cameraShake.time -= delta;
+            const shakeAmount = cameraShake.intensity * Math.sin(cameraShake.time * 50);
+            camera.position.x += shakeAmount;
+            camera.position.y += shakeAmount;
+        }
+
+        camera.rotation.z = targetTiltAngle; 
+        camera.rotation.x += landingAnimRotationX; 
+
+        const targetFov = baseFov + (currentSpeed / 70) + (isLandingAnimActive ? 20 : 0);
+        camera.fov += (targetFov - camera.fov) * delta * 5.0;
+        camera.updateProjectionMatrix();
+
+        speedLines.style.opacity = Math.min((currentSpeed + Math.abs(velocity.y)) / 1000, 0.8);
+    }
+    renderer.render(scene, camera);
+}
