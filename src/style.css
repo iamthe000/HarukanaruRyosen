@@ -1,0 +1,313 @@
+body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #aaccff; }
+#instructions {
+    position: absolute;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.3);
+    color: white;
+    pointer-events: none;
+    text-align: center;
+    user-select: none;
+    backdrop-filter: blur(8px);
+}
+#blocker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(20, 10, 40, 0.2);
+    z-index: 99;
+}
+h1 { margin: 0; font-size: 50px; text-shadow: 0 0 20px rgba(200,220,255,0.8); font-weight: lighter; letter-spacing: 4px; }
+p { font-size: 18px; line-height: 1.6; text-shadow: 0 0 5px rgba(0,0,50,0.5); }
+.key { font-weight: bold; color: #fff; border: 1px solid #fff; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.2); }
+#vignette {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle, transparent 50%, rgba(50,20,80,0.3) 100%);
+    pointer-events: none;
+    z-index: 90;
+}
+#speed-lines {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: transparent;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 91;
+    box-shadow: inset 0 0 100px rgba(200,240,255,0.3);
+    transition: opacity 0.1s;
+}
+
+/* --- Mobile Controls Styles --- */
+#mobile-controls { 
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%; 
+    display: none; 
+    touch-action: none; 
+}
+.joystick-area { 
+    position: absolute; 
+    bottom: 30px; 
+    left: 30px; 
+    width: 150px; 
+    height: 150px; 
+    background: rgba(255,255,255,0.2); 
+    border-radius: 50%; 
+}
+#joystick-thumb { 
+    position: absolute; 
+    top: 50%; 
+    left: 50%; 
+    width: 50px; 
+    height: 50px; 
+    background: rgba(255,255,255,0.5); 
+    border-radius: 50%; 
+    transform: translate(-50%, -50%); 
+}
+#jump-button { 
+    position: absolute; 
+    bottom: 40px; 
+    right: 40px; 
+    width: 80px; 
+    height: 80px; 
+    background: rgba(255,255,255,0.3); 
+    border-radius: 50%; 
+    display:flex; 
+    justify-content:center; 
+    align-items:center; 
+    font-size: 14px; 
+    color: white; 
+    border: 2px solid white; 
+    user-select: none;
+}
+#dash-button {
+    position: absolute;
+    bottom: 140px;
+    right: 55px;
+    width: 50px;
+    height: 50px;
+    background: rgba(255,255,255,0.3);
+    border-radius: 50%;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    font-size: 10px;
+    color: white;
+    border: 2px solid white;
+    user-select: none;
+    transition: background 0.2s;
+}
+#dash-button.active {
+    background: rgba(255, 200, 50, 0.8);
+    border-color: #ffeba7;
+    color: #331100;
+    font-weight: bold;
+}
+#camera-controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9; 
+}
+.joystick-area, #jump-button, #dash-button {
+    z-index: 10; 
+}
+
+/* --- Character Creator Styles --- */
+#menu-button {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    padding: 10px 15px;
+    background: rgba(255,255,255,0.2);
+    color: white;
+    border: 1px solid white;
+    border-radius: 5px;
+    cursor: pointer;
+    z-index: 100;
+    user-select: none;
+    font-size: 14px;
+}
+#creator-modal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(10, 5, 20, 0.8);
+    backdrop-filter: blur(10px);
+    z-index: 101;
+    display: none;
+    color: white;
+    font-family: sans-serif;
+}
+#creator-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+}
+#editor-panel {
+    flex-grow: 1;
+    position: relative;
+}
+#creator-ui {
+    width: 350px;
+    padding: 20px;
+    background: rgba(0,0,0,0.3);
+    overflow-y: auto;
+}
+#creator-ui h2 {
+    margin-top: 0;
+    text-align: center;
+    letter-spacing: 2px;
+    font-weight: lighter;
+}
+.ui-section {
+    margin-bottom: 20px;
+}
+.ui-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #aaa;
+}
+.ui-section input, .ui-section select {
+    width: 100%;
+    padding: 8px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: white;
+    font-size: 16px;
+}
+#color-palette {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+    gap: 10px;
+}
+.color-box {
+    width: 100%;
+    padding-bottom: 100%; /* Aspect ratio 1:1 */
+    border-radius: 4px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border 0.2s;
+}
+.color-box.selected {
+    border: 2px solid #00ffff;
+    box-shadow: 0 0 10px #00ffff;
+}
+#creator-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+#creator-actions button {
+    flex-grow: 1;
+    padding: 12px 10px;
+    border: none;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+    text-align: center;
+}
+#save-char-button {
+    background: #00aaff;
+    color: white;
+}
+#import-char-button {
+    background: #4caf50;
+    color: white;
+}
+#export-char-button {
+    background: #ff9800;
+    color: white;
+}
+#close-creator-button {
+    background: #555;
+    color: white;
+}
+#voxel-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+#edit-tools {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+.edit-tool {
+    flex-grow: 1;
+    padding: 10px;
+    border: 1px solid #555;
+    background: rgba(255,255,255,0.1);
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.edit-tool.selected {
+    background: #00aaff;
+    border-color: #00aaff;
+}
+
+/* --- Hotbar Styles --- */
+#hotbar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 8px;
+    border-radius: 10px;
+    z-index: 100;
+}
+.hotbar-slot {
+    width: 60px;
+    height: 60px;
+    border: 2px solid #888;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 12px;
+    user-select: none;
+    transition: all 0.2s;
+}
+.hotbar-slot.selected {
+    border-color: #00ffff;
+    background: rgba(0, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+@media (orientation: portrait) {
+    #creator-container {
+        flex-direction: column;
+    }
+    #creator-ui {
+        width: 100%;
+        height: 45%; /* Adjust as needed */
+        box-sizing: border-box;
+    }
+    #editor-panel {
+        height: 55%; /* Adjust as needed */
+    }
+}
