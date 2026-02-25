@@ -2,33 +2,127 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Natural Open World - High Mountains</title>
+    <title>遥かなる稜線</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon192x192.png">
+    <link rel="icon" href="icon192x192.png">
+    <script>
+        // if ('serviceWorker' in navigator) {
+        //     navigator.serviceWorker.register('sw.js');
+        // }
+    </script>
     <link rel="stylesheet" href="src/style.css">
 </head>
 <body>
+    <div id="vignette"></div>
+    <div id="speed-lines"></div>
 
-<div id="loading">
-    <div class="spinner"></div>
-    <div id="loading-text">Loading Assets...</div>
-</div>
+    <div id="menu-button">キャラクリエイト</div>
 
-<div class="guide">
-    LEFT: Move<br>
-    RIGHT: Look
-</div>
-<div class="credits">Textures from Three.js Examples & Polyhaven</div>
-<div id="zone_joystick"></div>
+    <div id="creator-modal">
+        <div id="creator-container">
+            <div id="editor-panel">
+                <canvas id="voxel-canvas"></canvas>
+            </div>
+            <div id="creator-ui">
+                <h2>キャラクタークリエイト</h2>
+                
+                <div class="ui-section">
+                    <label for="char-name">名前</label>
+                    <input type="text" id="char-name" placeholder="キャラクター名">
+                </div>
 
-<script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                <div class="ui-section">
+                    <label>編集モード</label>
+                    <div id="edit-tools">
+                        <button id="add-voxel-tool" class="edit-tool selected">追加</button>
+                        <button id="remove-voxel-tool" class="edit-tool">削除</button>
+                    </div>
+                    <label>カラーパレット</label>
+                    <div id="color-palette"></div>
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-speed">移動速度</label>
+                    <input type="range" id="char-speed" min="0.5" max="3" value="1" step="0.1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="char-lifespan">寿命 (秒)</label>
+                    <input type="number" id="char-lifespan" min="10" max="1000" value="120">
+                </div>
+                
+                <div class="ui-section">
+                    <label for="repro-type">繁殖タイプ</label>
+                    <select id="repro-type">
+                        <option value="asexual">無性生殖</option>
+                        <option value="sexual">有性生殖</option>
+                        <option value="none">繁殖なし (初期リスのみ)</option>
+                    </select>
+                </div>
+
+                <div class="ui-section">
+                    <label for="repro-count">一回の繁殖で増える個体数</label>
+                    <input type="number" id="repro-count" min="1" max="10" value="1">
+                </div>
+
+                <div class="ui-section">
+                    <label for="move-method">移動方法</label>
+                    <select id="move-method">
+                        <option value="random_walk">ランダムウォーク</option>
+                        <option value="still">静止</option>
+                    </select>
+                </div>
+
+                <div id="creator-actions">
+                    <button id="close-creator-button">閉じる</button>
+                    <button id="import-char-button">インポート</button>
+                    <button id="export-char-button">エクスポート</button>
+                    <button id="save-char-button">保存</button>
+                </div>
+                <input type="file" id="import-file-input" style="display: none;" accept=".hrc" />
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-controls">
+        <div id="camera-controls"></div> 
+        <div class="joystick-area">
+            <div id="joystick-thumb"></div>
+        </div>
+        <div id="dash-button">DASH</div>
+        <div id="jump-button">JUMP</div>
+    </div>
+    <div id="blocker">
+        <div id="instructions">
+            <h1>遥かなる稜線</h1>
+            <p>
+                クリックまたはタッチして旅を始める<br><br>
+                移動: <span class="key">W, A, S, D</span><br>
+                ダッシュ: <span class="key">Shift</span><br>
+                ジャンプ: <span class="key">Space</span><br>
+                <br>
+                <span style="font-size: 14px; color: #ddeeff;">果てしなく続く平原と山脈</span>
+            </p>
+        </div>
+    </div>
+
+    <div id="hotbar">
+        <div class="hotbar-slot" id="slot-0">1: AK</div>
+        <div class="hotbar-slot" id="slot-1">2: Axe</div>
+        <div class="hotbar-slot" id="slot-2">3: C4</div>
+        <div class="hotbar-slot" id="slot-3">4: Jetpack</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
         }
-    }
-</script>
+    </script>
 
-<script type="module" src="src/script.js"></script>
+    <script type="module" src="src/script.js"></script>
 </body>
 </html>
